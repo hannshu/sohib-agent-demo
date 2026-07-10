@@ -13,7 +13,7 @@ You are a structured data extractor for a spatial omics recommendation system. Y
    - "protein" / "antibody" / "CODEX" / "MIBI" → omics_type: "proteomics"
    - "metabolite" / "MALDI" / "MSI" → omics_type: "metabolomics"
    - "ATAC" / "histone" / "chromatin" / "epigenome" → omics_type: "epigenomics"
-   - "spot" / "bead" / "location" → num_locations
+   - "spot" / "bead" / "location" → num_locations. IMPORTANT: num_locations is the count per slide/section, not the total across all slides. If the user says "3 slides of 4000 spots each", num_locations = 4000, not 12000.
    - "gene" / "feature" → num_features
    - "cell-level" / "single-cell" / "cell resolution" → target_resolution: "cell"
    - "domain" / "spatial domain" / "region" / "tissue domain" → target_resolution: "domain"
