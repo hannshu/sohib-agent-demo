@@ -70,7 +70,11 @@ Wide format: one row per method (43 methods observed, though the manuscript eval
 
 Only `task_5.csv` has been supplied so far; the same structure is expected for other task numbers when supplied later. Rows are individual metric names (for example `batch_metrics_iLISI`, `batch_metrics_ASW_batch`, `batch_metrics_PCR_comparison`, `batch_metrics_kBET`), columns are method names. These map directly onto the manuscript's named BER metrics (iLISI, batch ASW, PCR, kBET), and analogous row-name patterns should exist for BPC, SPC, and DTP metrics in other task files (`batch_metrics_*` for BER; expect `bio_metrics_*`, `spatial_metrics_*`, `downstream_metrics_*` or similarly prefixed rows for the other three categories — confirm the actual prefixes against a second task file before hardcoding a parser, since only one task file has been seen so far).
 
-### 3.4 Fields present in the manuscript but not yet in structured file form
+### 3.4 Cell-level score file — required, not yet supplied
+
+None of the three files supplied so far contain per-method cell-level scores. The manuscript reports, for single-cell-resolution tasks, a separate set of cell-level metrics: classification accuracy, macro-averaged F1, isolated labels, cell-type LISI, and cell-type ASW, computed against cell-type labels rather than domain labels (its Figure 4). A file in the same shape as `overall_ranks.csv` but scoped to single-cell-resolution tasks and these five metrics is required before Section 7.4 can be implemented as anything more than a static lookup of the manuscript's own top-3 cell-level methods (Scanorama, Harmony, BANKSY). Do not approximate this file by reusing `overall_ranks.csv`'s BPC scores as a stand-in — the manuscript's central finding is that domain-level and cell-level scores are negatively correlated for several metrics, so substituting one for the other would silently reproduce the exact confound the benchmark was built to expose.
+
+### 3.5 Fields present in the manuscript but not yet in structured file form
 
 These must be extracted from the manuscript text (already done in this conversation) and hand-encoded once, not re-derived from the CSVs, because the CSVs do not contain them:
 
@@ -104,6 +108,12 @@ These must be extracted from the manuscript text (already done in this conversat
     "Task_1": {
       "GraphPCA": {"overall": 1.0, "BPC": 1.0, "BER": 0.695, "SPC": 0.853, "DTP": 0.938,
                     "completion_status": "success", "architecturally_inapplicable": false}
+    }
+  },
+  "cell_level_scores": {
+    "_comment": "populated only for single-cell-resolution tasks, once Section 3.4's file is supplied; do not derive from method_scores",
+    "Task_14": {
+      "BANKSY": {"acc": null, "f1": null, "isolated_labels": null, "cLISI": null, "cASW": null, "overall_cell_level": null}
     }
   },
   "decision_tree": { "...": "see Section 6" },
@@ -224,6 +234,12 @@ Since exact runtime/memory numbers are not available (see Section 3.4), substitu
 - `avoid_deep_learning` and `method_metadata[method].deep_learning` → remove.
 - `architecturally_inapplicable[method][profile.omics_type]` → remove, and do not count this as a "poor score," since it is a different fact (cannot run vs. ran and scored low).
 
+### 7.4 Cell-level ranking mode (separate function, not a parameter of 7.2)
+
+If `profile.target_resolution == "cell"`, method ranking must call a distinct function, `rank_methods_cell_level(profile, matched_datasets)`, which reads exclusively from `knowledge_base["cell_level_scores"]` and never touches `method_scores`. Do not implement this as an `if resolution == "cell": weight BPC differently` branch inside 7.2 — that would still risk domain-level scores leaking into a cell-level answer through a shared code path. The two functions should not call each other and should not share a weighting table, only the upstream `matched_datasets` list from Section 7.1.
+
+Until Section 3.4's cell-level score file is supplied, `rank_methods_cell_level` should not attempt to compute anything from `method_scores`; it should return the decision tree's static `cell_level_analysis` branch methods (Scanorama, Harmony, BANKSY) with a `confidence_note` stating plainly that this is the benchmark's published branch answer, not a freshly computed ranking, because the underlying per-dataset cell-level data is not yet available. Once the file is supplied, replace this static fallback with real matching, following the same pattern as 7.1–7.2.
+
 ## 8. h5ad extraction module (`h5ad_profile.py`)
 
 ```python
@@ -257,6 +273,7 @@ Adapt the reference project's `recommendation_answer.md` section structure (Reco
 
 - If `matched_branch` is not null, the answer must state that the recommendation follows a directly published SOHIB decision-tree branch, not an inferred match.
 - If any recommended method's evidence includes a `completion_status` other than `success` on the closest matched dataset, this must be stated as a tradeoff explicitly, in the same sentence as the method name, not buried in a footnote.
+- If `profile.target_resolution == "cell"`, the answer must draw only on `cell_level_scores` evidence (or the static decision-tree fallback, per Section 7.4) and must never cite a domain-level BPC, BER, SPC, or DTP number as supporting evidence for a cell-level recommendation, even if it is the only number available for that method.
 
 ## 10. CLI flow
 
@@ -266,12 +283,14 @@ Mirror the reference project: `sohib-agent chat` starts a loop; `/profile` print
 
 For each of the 33 tasks: remove it from `knowledge_base.json`, construct a synthetic profile from its own `data_w_sparsity.csv` row, run the full matching pipeline against the remaining 32 tasks, and check (a) the top matched dataset shares the same `omics_type` and `st_category`, and (b) the top-ranked recommended method appears in that held-out task's own top-3 methods per `overall_ranks.csv`. Report the hit rate. This must run and pass at some documented threshold before the CLI is presented as reliable — do not skip this step to save time.
 
+Once Section 3.4's cell-level score file exists, repeat the same leave-one-out procedure restricted to single-cell-resolution tasks, calling `rank_methods_cell_level` instead of the domain-level ranking function, and report its hit rate separately rather than averaging it into the domain-level result — a single combined number would hide exactly the kind of domain/cell-level divergence the benchmark exists to measure.
+
 ## 12. Ordered task list for the code agent
 
 1. Write `models.py` and get it to import cleanly with no other dependencies.
 2. Write `build_knowledge_base.py` against the actual supplied CSVs; write `tests/test_knowledge_base.py` asserting row counts and a handful of spot-checked values match the raw CSVs exactly.
 3. Hand-encode `method_metadata` (deep_learning, omics_agnostic, category) and the omics-applicability table from the manuscript text into a small JSON or Python literal — this is manual transcription work, not inference, and should be reviewed by the applicant before being trusted.
-4. Write `decision_tree.py` and `matching.py` with unit tests before anything else touches them.
+4. Write `decision_tree.py` and `matching.py` with unit tests before anything else touches them, including `rank_methods_cell_level` as the static decision-tree fallback described in Section 7.4 — do not stub it as a TODO, since it is the only cell-level answer available until Section 3.4's file is supplied.
 5. Write `h5ad_profile.py`; test against at least two differently-structured public `.h5ad` files.
 6. Write the two prompt files and the two thin LLM-calling modules; keep them thin — all scoring logic must already be complete and tested before this step.
 7. Wire up `cli.py`.
@@ -283,3 +302,4 @@ For each of the 33 tasks: remove it from `knowledge_base.json`, construct a synt
 - Confirm the raw-metric row-name prefixes for BPC, SPC, and DTP categories using a second `task_{N}.csv` file (only the BER-category prefixes are confirmed from `task_5.csv` so far).
 - Confirm whether any runtime/memory logs exist anywhere outside the manuscript's qualitative failure descriptions; if none exist, Section 7.2's binary-penalty approximation should be treated as a permanent design choice, not a placeholder.
 - Decide the integration-mode field (cross-slice vs. one-slice/cross-slice multiomics) is out of scope for this version, since SOHIB's own task design does not appear to vary this axis the way the reference project's benchmark does — confirm before building it into the schema.
+- Supply the per-method cell-level score file described in Section 3.4. Until it exists, treat cell-level requests as answered only by the static decision-tree branch (Section 7.4), and say so explicitly in every cell-level answer rather than presenting the static branch as a freshly computed, dataset-matched recommendation.

@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sohib-agent"
+version = "0.1.0"
+description = "CLI recommendation agent for spatial omics integration methods, backed by the SOHIB benchmark"
+requires-python = ">=3.11"
+dependencies = [
+    "pandas>=2.0",
+    "anndata>=0.10",
+    "scanpy>=1.9",
+    "pydantic>=2.0",
+    "anthropic>=0.25",
+    "rich>=13.0",
+    "click>=8.0",
+]
+
+[project.scripts]
+sohib-agent = "sohib_agent.cli:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-cov"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sohib_agent"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

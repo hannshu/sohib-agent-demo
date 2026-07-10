@@ -1,0 +1,28 @@
+# ── Raw benchmark CSVs ────────────────────────────────────────────────────────
+# Place data_w_sparsity.csv, overall_ranks.csv, task_*.csv here before running
+# sohib-agent build-kb. Not committed — the pre-built knowledge_base.json is.
+data/raw/
+
+# ── Developer / build tooling (not needed to use the agent) ──────────────────
+tests/
+demo.py
+
+# ── Python build artifacts ────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+.uv/
+
+# ── Test / CI artifacts ───────────────────────────────────────────────────────
+.pytest_cache/
+htmlcov/
+.coverage
+
+# ── Editor ────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
