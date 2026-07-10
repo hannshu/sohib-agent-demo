@@ -87,7 +87,10 @@ def extract_profile_from_text(text: str, current_profile: UserProfile | None = N
     raw = _strip_fences(response.content[0].text)
 
     try:
-        return json.loads(raw)
+        parsed = json.loads(raw)
+        # If LLM returned a clarifying question, it looks like {"clarify": "..."}
+        # Pass it through — caller handles it.
+        return parsed
     except json.JSONDecodeError as e:
         raise RuntimeError(
             f"LLM returned invalid JSON for profile extraction.\n"

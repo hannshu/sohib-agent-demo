@@ -197,22 +197,24 @@ def chat(no_llm: bool) -> None:
             )
             continue
 
-        with console.status("Extracting profile fields…"):
+        with console.status("Thinking…"):
             try:
                 extracted = extract_profile_from_text(line, profile)
-                profile = _merge_extracted(profile, extracted)
             except Exception as e:
-                console.print(f"[red]Profile extraction failed: {e}[/red]")
+                console.print(f"[red]LLM call failed: {e}[/red]")
                 continue
 
-        _print_profile(profile)
+        # LLM returned a clarifying question instead of fields
+        if "clarify" in extracted:
+            console.print(extracted["clarify"])
+            continue
 
-        missing = profile.missing_required_fields()
-        if missing:
-            console.print(
-                "[yellow]I still need a bit more info to give a recommendation:[/yellow]\n"
-                + "\n".join(f"  • {m}" for m in missing)
-            )
+        profile = _merge_extracted(profile, extracted)
+
+        if not profile.is_ready_for_recommendation():
+            # Profile still incomplete — ask for the next missing piece naturally
+            missing = profile.missing_required_fields()
+            console.print(missing[0].split("(")[1].rstrip(")").strip().capitalize() + "?")
         else:
             _do_recommend(profile, kb, no_llm)
 
@@ -220,14 +222,6 @@ def chat(no_llm: bool) -> None:
 def _do_recommend(profile: UserProfile, kb: dict, no_llm: bool) -> None:
     with console.status("Computing recommendation…"):
         result = _run_recommendation(profile, kb)
-
-    console.print(Panel(
-        f"[bold]Matched branch:[/bold] {result.matched_branch or 'none (similarity matching used)'}\n"
-        f"[bold]Matched datasets:[/bold] {len(result.matched_datasets)}\n"
-        f"[bold]Top methods:[/bold] "
-        + ", ".join(m["method"] for m in result.recommended_methods[:5]),
-        title="[bold green]Recommendation[/bold green]",
-    ))
 
     if no_llm:
         import json
@@ -239,8 +233,8 @@ def _do_recommend(profile: UserProfile, kb: dict, no_llm: bool) -> None:
 
     with console.status("Writing answer…"):
         try:
-            answer = write_answer(profile, result)
-            console.print(Panel(answer, title="[bold cyan]Analysis[/bold cyan]"))
+            answer = write_answer(profile, result, method_scores=kb.get("method_scores"))
+            console.print(answer)
         except Exception as e:
             console.print(f"[red]Answer writing failed: {e}[/red]")
             import json
