@@ -1,0 +1,165 @@
+Slice ID,Task ID,Omics type,Sequencing technique,Species,Tissue,Batch ID,# Cells/spots,# Features,sparsity
+Dataset_1,Task_1,Spatial transcriptomics (sST),Visium,Human,Cortex,151507,4226,33538,0.957953057013656
+Dataset_2,Task_1,Spatial transcriptomics (sST),Visium,Human,Cortex,151508,4384,33538,0.9644772565426384
+Dataset_3,Task_1,Spatial transcriptomics (sST),Visium,Human,Cortex,151509,4789,33538,0.9572421323883633
+Dataset_4,Task_1,Spatial transcriptomics (sST),Visium,Human,Cortex,151510,4634,33538,0.9591938793177177
+Dataset_5,Task_2,Spatial transcriptomics (sST),Visium,Human,Cortex,151669,3661,33538,0.9463187777931238
+Dataset_6,Task_2,Spatial transcriptomics (sST),Visium,Human,Cortex,151670,3498,33538,0.9500567373956839
+Dataset_7,Task_2,Spatial transcriptomics (sST),Visium,Human,Cortex,151671,4110,33538,0.9445863638137747
+Dataset_8,Task_2,Spatial transcriptomics (sST),Visium,Human,Cortex,151672,4015,33538,0.9475722897028682
+Dataset_9,Task_3,Spatial transcriptomics (sST),Visium,Human,Cortex,151673,3639,33538,0.9342740765434773
+Dataset_10,Task_3,Spatial transcriptomics (sST),Visium,Human,Cortex,151674,3673,33538,0.9195961598399495
+Dataset_11,Task_3,Spatial transcriptomics (sST),Visium,Human,Cortex,151675,3592,33538,0.9461062251495196
+Dataset_12,Task_3,Spatial transcriptomics (sST),Visium,Human,Cortex,151676,3460,33538,0.9422571997530538
+Dataset_13,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,02A,240,23371,0.7980313921811932
+Dataset_14,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,02B,218,23371,0.7862056755824183
+Dataset_15,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,03A,269,23371,0.794879556352923
+Dataset_16,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,03B,274,23371,0.8079711989436031
+Dataset_17,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,21A,620,23371,0.820750143892141
+Dataset_18,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,21B,576,23371,0.8076367940562615
+Dataset_19,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,22A,589,23371,0.7589554741815401
+Dataset_20,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,22B,604,23371,0.7755602757818669
+Dataset_21,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,23A,574,23371,0.8207457140740102
+Dataset_22,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,23B,639,23371,0.7842462091209034
+Dataset_23,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,24A,617,23371,0.7988699233635834
+Dataset_24,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,24B,606,23371,0.8019988383674275
+Dataset_25,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,30A,527,23371,0.7999008973072501
+Dataset_26,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,31A,548,23371,0.8122500840926133
+Dataset_27,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,32A,524,23371,0.7859049072691053
+Dataset_28,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,33A,484,23371,0.7939075445269991
+Dataset_29,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,33B,490,23371,0.815646112965746
+Dataset_30,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,34A,478,23371,0.8012154855577729
+Dataset_31,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,34B,479,23371,0.8359473211853922
+Dataset_32,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,35A,428,23371,0.8328306068268166
+Dataset_33,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,35B,419,23371,0.831899864885689
+Dataset_34,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,36A,386,23371,0.815166841329197
+Dataset_35,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,36B,406,23371,0.8024626537077129
+Dataset_36,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,37A,237,23371,0.8295346734123775
+Dataset_37,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,37B,250,23371,0.8160836934662616
+Dataset_38,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,38A,279,23371,0.8275103983446691
+Dataset_39,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,38B,276,23371,0.8118633336619954
+Dataset_40,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,39A,245,23371,0.8213533430144981
+Dataset_41,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,39B,240,23371,0.8160824312181764
+Dataset_42,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,40A,188,23371,0.816229788326504
+Dataset_43,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,40B,214,23371,0.8272729562997836
+Dataset_44,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,04A,287,23371,0.8221447498068201
+Dataset_45,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,04B,326,23371,0.7937911621896256
+Dataset_46,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,05A,361,23371,0.8276009368809583
+Dataset_47,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,05B,357,23371,0.8213139005976786
+Dataset_48,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,06A,393,23371,0.8410365470005181
+Dataset_49,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,06B,403,23371,0.8139564069190115
+Dataset_50,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,08A,381,23371,0.8203771392210393
+Dataset_51,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,08B,470,23371,0.862695084014832
+Dataset_52,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,09A,491,23371,0.8321956441395463
+Dataset_53,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,09B,512,23371,0.7917644998074537
+Dataset_54,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,10A,487,23371,0.8708081418933256
+Dataset_55,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,10B,522,23371,0.8772235657020662
+Dataset_56,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,11A,494,23371,0.7828975735006376
+Dataset_57,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,12A,506,23371,0.8321189751901913
+Dataset_58,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,12B,546,23371,0.801016193168861
+Dataset_59,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,13A,433,23371,0.8486619537863144
+Dataset_60,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,13B,509,23371,0.8063156369214479
+Dataset_61,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,14A,580,23371,0.8016111184063952
+Dataset_62,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,14B,589,23371,0.8003028436486848
+Dataset_63,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,15A,556,23371,0.856027530891294
+Dataset_64,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,15B,546,23371,0.8405503329554505
+Dataset_65,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,16A,560,23371,0.8350935530602639
+Dataset_66,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,16B,519,23371,0.8360379268841736
+Dataset_67,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,17A,580,23371,0.8143718489905704
+Dataset_68,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,17B,603,23371,0.8131335676813968
+Dataset_69,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,18A,577,23371,0.8096811828966071
+Dataset_70,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,18B,570,23371,0.819554148303453
+Dataset_71,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,20A,556,23371,0.8279263115544105
+Dataset_72,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,20B,536,23371,0.8151541775526118
+Dataset_73,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,25A,508,23371,0.8136950969250876
+Dataset_74,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,26A,548,23371,0.8139459127554362
+Dataset_75,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,26B,534,23371,0.8149075401074061
+Dataset_76,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,27A,508,23371,0.7641778440674677
+Dataset_77,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,27B,494,23371,0.7696058144657285
+Dataset_78,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,28A,460,23371,0.7613855335393362
+Dataset_79,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,28B,468,23371,0.7528777720361307
+Dataset_80,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,29A,462,23371,0.7575534373916984
+Dataset_81,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,29B,450,23371,0.7129703954093154
+Dataset_82,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,01A,152,23371,0.8178103655227238
+Dataset_83,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,01B,197,23371,0.8053442517485009
+Dataset_84,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,07A,488,23371,0.830918817702477
+Dataset_85,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,07B,461,23371,0.8116169333464884
+Dataset_86,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,19A,591,23371,0.822269938281647
+Dataset_87,Task_4,Spatial transcriptomics (sST),Visium,Mouse,Whole brain,19B,604,23371,0.8270455885640805
+Dataset_88,Task_5,Spatial transcriptomics (sST),Array-seq,Mouse,Kidney,KI_1,16492,32285,0.9792132892343164
+Dataset_89,Task_5,Spatial transcriptomics (sST),Array-seq,Mouse,Kidney,KI_2,16496,32285,0.9799446258445973
+Dataset_90,Task_5,Spatial transcriptomics (sST),Array-seq,Mouse,Kidney,KI_3,17017,32285,0.9837613797802922
+Dataset_91,Task_6,Spatial transcriptomics (sST),Array-seq,Mouse,Liver,LI_1,21791,32285,0.9856573344388087
+Dataset_92,Task_6,Spatial transcriptomics (sST),Array-seq,Mouse,Liver,LI_2,21284,32285,0.9837561274843305
+Dataset_93,Task_6,Spatial transcriptomics (sST),Array-seq,Mouse,Liver,LI_3,20210,32285,0.9849441005726077
+Dataset_94,Task_7,Spatial transcriptomics (sST),Stereo-seq,Human,Cortex,B01012A3,31329,33044,0.9352745017405103
+Dataset_95,Task_7,Spatial transcriptomics (sST),Stereo-seq,Human,Cortex,B01012B2,35772,33044,0.9279971233838737
+Dataset_96,Task_8,Spatial transcriptomics (sST),Stereo-seq,Mouse,Embryo,E9.5,5913,23761,0.8496429716659559
+Dataset_97,Task_8,Spatial transcriptomics (sST),Stereo-seq,Mouse,Embryo,E10.5,18408,23761,0.8492589452062103
+Dataset_98,Task_8,Spatial transcriptomics (sST),Stereo-seq,Mouse,Embryo,E11.5,30124,23761,0.8821888773628184
+Dataset_99,Task_8,Spatial transcriptomics (sST),Stereo-seq,Mouse,Embryo,E12.5,51365,23761,0.8979722872430016
+Dataset_100,Task_8,Spatial transcriptomics (sST),Stereo-seq,Mouse,Embryo,E13.5,77369,23761,0.9128516803543751
+Dataset_101,Task_8,Spatial transcriptomics (sST),Stereo-seq,Mouse,Embryo,E14.5,102519,23761,0.8825936245866459
+Dataset_102,Task_8,Spatial transcriptomics (sST),Stereo-seq,Mouse,Embryo,E15.5,113350,23761,0.9283879818707049
+Dataset_103,Task_8,Spatial transcriptomics (sST),Stereo-seq,Mouse,Embryo,E16.5,121767,23761,0.9267863772736572
+Dataset_104,Task_9,Spatial transcriptomics (sST),Stereo-seq,Axolotl,Brain,Stage44_telencephalon_rep2_FP200000239BL_E4,1477,12704,0.9438666714133933
+Dataset_105,Task_9,Spatial transcriptomics (sST),Stereo-seq,Axolotl,Brain,Stage54_telencephalon_rep2_DP8400015649BRD6_2,2929,12704,0.8077796580361589
+Dataset_106,Task_9,Spatial transcriptomics (sST),Stereo-seq,Axolotl,Brain,Stage57_telencephalon_rep2_DP8400015649BRD5_1,4410,12704,0.766361943601958
+Dataset_107,Task_9,Spatial transcriptomics (sST),Stereo-seq,Axolotl,Brain,Injury_control_FP200000239BL_E3,11698,12704,0.9530054600390259
+Dataset_108,Task_9,Spatial transcriptomics (sST),Stereo-seq,Axolotl,Brain,Batch1_Adult_telencephalon_rep2_DP8400015234BLA3_1,8243,12704,0.8866751034615739
+Dataset_109,Task_9,Spatial transcriptomics (sST),Stereo-seq,Axolotl,Brain,Meta_telencephalon_rep1_DP8400015234BLB2_1,7441,12704,0.905860464199139
+Dataset_110,Task_10,Spatial transcriptomics (sST),Slide-seq,Human,Lung,0,40217,26472,0.9932209614608654
+Dataset_111,Task_10,Spatial transcriptomics (sST),Slide-seq,Human,Lung,1,37568,26472,0.9918225136098932
+Dataset_112,Task_10,Spatial transcriptomics (sST),Slide-seq,Human,Lung,2,37563,26472,0.9912366696097228
+Dataset_113,Task_11,Spatial transcriptomics (sST),Slide-seq,Human,Lymph,0,40982,26875,0.9885171786138668
+Dataset_114,Task_11,Spatial transcriptomics (sST),Slide-seq,Human,Lymph,1,37275,26875,0.9895903615179449
+Dataset_115,"Task_27, Task_28",Spatial transcriptomics (sST),Slide-seq,Mouse,Brain,-,49969,24513,
+Dataset_116,Task_12,Spatial transcriptomics (iST),CosMx,Human,Lung,LUAD-5 R1,98002,960,0.8654590701380244
+Dataset_117,Task_12,Spatial transcriptomics (iST),CosMx,Human,Lung,LUAD-5 R2,100335,960,0.8455878016976462
+Dataset_118,Task_12,Spatial transcriptomics (iST),CosMx,Human,Lung,LUAD-5 R3,97809,960,0.8798385863434517
+Dataset_119,Task_13,Spatial transcriptomics (iST),CosMx,Human,Lung,LUAD-9 R1,87606,960,0.8657462103052302
+Dataset_120,Task_13,Spatial transcriptomics (iST),CosMx,Human,Lung,LUAD-9 R2,139504,960,0.8907097571276331
+Dataset_121,Task_14,Spatial transcriptomics (iST),MERFISH,Mouse,Brain,MsBrainAgingSpatialDonor_1,21002,374,0.8125602501824374
+Dataset_122,Task_14,Spatial transcriptomics (iST),MERFISH,Mouse,Brain,MsBrainAgingSpatialDonor_4,31508,374,0.811485530540075
+Dataset_123,Task_14,Spatial transcriptomics (iST),MERFISH,Mouse,Brain,MsBrainAgingSpatialDonor_7,32792,374,0.872856363819009
+Dataset_124,Task_14,Spatial transcriptomics (iST),MERFISH,Mouse,Brain,MsBrainAgingSpatialDonor_8,38338,374,0.8283353135619203
+Dataset_125,Task_15,Spatial transcriptomics (iST),MERFISH,Mouse,Brain,MsBrainAgingSpatialDonor_10,28105,374,0.8813106313509215
+Dataset_126,Task_15,Spatial transcriptomics (iST),MERFISH,Mouse,Brain,MsBrainAgingSpatialDonor_11,28955,374,0.8952711980696582
+Dataset_127,Task_15,Spatial transcriptomics (iST),MERFISH,Mouse,Brain,MsBrainAgingSpatialDonor_12,33241,374,0.8634174149023812
+Dataset_128,Task_16,Spatial transcriptomics (iST),MERFISH,Mouse,Brain,MsBrainAgingSpatialDonor_2,40484,374,0.8496910643248775
+Dataset_129,Task_16,Spatial transcriptomics (iST),MERFISH,Mouse,Brain,MsBrainAgingSpatialDonor_3,35347,374,0.7859451951462423
+Dataset_130,Task_16,Spatial transcriptomics (iST),MERFISH,Mouse,Brain,MsBrainAgingSpatialDonor_5,29371,374,0.8495758758002228
+Dataset_131,Task_16,Spatial transcriptomics (iST),MERFISH,Mouse,Brain,MsBrainAgingSpatialDonor_6,25907,374,0.835847227299458
+Dataset_132,Task_16,Spatial transcriptomics (iST),MERFISH,Mouse,Brain,MsBrainAgingSpatialDonor_9,33868,374,0.8200942444684586
+Dataset_133,Task_17,Spatial transcriptomics (iST),MERFISH,Human,Cortex,PFC,51074,300,0.8334759368759055
+Dataset_134,Task_17,Spatial transcriptomics (iST),MERFISH,Human,Cortex,V1,169905,300,0.8440087499877382
+Dataset_135,Task_18,Spatial transcriptomics (iST),MERFISH,Human,Cortex,BA10,52483,300,0.8232432724247216
+Dataset_136,Task_18,Spatial transcriptomics (iST),MERFISH,Human,Cortex,BA17,56343,300,0.7514970212212105
+Dataset_137,Task_19,Spatial transcriptomics (iST),MERFISH,Human,Cortex,Middle frontal gyrus,47632,300,0.8731935813458739
+Dataset_138,Task_19,Spatial transcriptomics (iST),MERFISH,Human,Cortex,BA17,26593,300,0.8514407300166711
+Dataset_139,"Task_25, Task_26, Task_27",Spatial transcriptomics (iST),MERFISH,Mouse,Brain,0,48234,1120,
+Dataset_140,Task_25,Spatial transcriptomics (iST),MERFISH,Mouse,Brain,1,40837,1120,
+Dataset_141,Task_20,Spatial transcriptomics (iST),STARMap,Mouse,cortex,BZ5,1049,166,0.6943158716850242
+Dataset_142,Task_20,Spatial transcriptomics (iST),STARMap,Mouse,cortex,BZ9,1053,166,0.7655694001075527
+Dataset_143,Task_20,Spatial transcriptomics (iST),STARMap,Mouse,cortex,BZ14,1088,166,0.695788669383416
+Dataset_144,Task_21,Spatial transcriptomics (iST),STARMap,Mouse,Brain,4,44514,1022,0.9099233452093658
+Dataset_145,Task_21,Spatial transcriptomics (iST),STARMap,Mouse,Brain,5,46184,1022,0.8894177395751801
+Dataset_146,"Task_26, Task_28",Spatial transcriptomics (iST),STARMap,Mouse,Brain,-,42219,1022,
+Dataset_147,Task_22,Spatial transcriptomics (iST),Xenium,Human,Cortex,MSa1,133864,266,0.8043231453851266
+Dataset_148,Task_22,Spatial transcriptomics (iST),Xenium,Human,Cortex,MSa2,75598,266,0.8598097137072688
+Dataset_149,Task_23,Spatial transcriptomics (iST),Xenium,Human,Cortex,CTRL2,99682,266,0.8219265836789562
+Dataset_150,Task_23,Spatial transcriptomics (iST),Xenium,Human,Cortex,CTRL1,95825,266,0.8213064620852941
+Dataset_151,Task_24,Spatial transcriptomics (iST),Xenium,Human,Cortex,MSi2,103324,266,0.8270411448271486
+Dataset_152,Task_24,Spatial transcriptomics (iST),Xenium,Human,Cortex,MSi1,152508,266,0.8260495049094922
+Dataset_153,Task_29,Spatial proteomics,CODEX,Mouse,Spleen,BALBc-1,82382,29,
+Dataset_154,Task_29,Spatial proteomics,CODEX,Mouse,Spleen,BALBc-2,81925,29,
+Dataset_155,Task_29,Spatial proteomics,CODEX,Mouse,Spleen,BALBc-3,80973,29,
+Dataset_156,Task_30,Spatial metabolomics,MALDI-MSI,Mouse,Brain,A1,2384,1538,
+Dataset_157,Task_30,Spatial metabolomics,MALDI-MSI,Mouse,Brain,B1,2819,1538,
+Dataset_158,Task_30,Spatial metabolomics,MALDI-MSI,Mouse,Brain,C1,2666,1538,
+Dataset_159,Task_31,Spatial epigenomics,MERFISH-epigenomics,Mouse,Cortex,H3K27ac_rep1,4660,139,
+Dataset_160,Task_31,Spatial epigenomics,MERFISH-epigenomics,Mouse,Cortex,H3K27ac_rep2,3229,139,
+Dataset_161,Task_32,Spatial epigenomics,MERFISH-epigenomics,Mouse,Cortex,H3K4me3_rep1,3948,127,
+Dataset_162,Task_32,Spatial epigenomics,MERFISH-epigenomics,Mouse,Cortex,H3K4me3_rep2,3137,127,
+Dataset_163,Task_33,Spatial epigenomics,MISAR-seq,Mouse,Brain,e15,1867,161311,
+Dataset_164,Task_33,Spatial epigenomics,MISAR-seq,Mouse,Brain,e18,1967,161311,
