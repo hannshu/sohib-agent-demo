@@ -157,12 +157,17 @@ class UserProfile(BaseModel):
     num_features: Optional[int] = None
     sparsity: Optional[float] = None
     batch_effect_severity: Optional[Literal["minimal", "moderate", "maximal"]] = None
-    priority: Literal["accuracy", "speed", "memory", "balanced"] = "balanced"
+    user_goal: Optional[str] = None          # user's own stated objective, in their words
+    priority: Optional[Literal["accuracy", "speed", "memory", "balanced"]] = None
     avoid_deep_learning: bool = False
     source: Literal["text", "h5ad", "text+h5ad"] = "text"
 ```
 
 `target_resolution` and `omics_type` are the two gating fields — the agent will not give a final recommendation until both are present.
+
+`priority` has no default (`None`, not `"balanced"`) so Call 2 can tell "the user asked for this tradeoff" from "this field was never set" — a concrete default here previously caused the LLM to write as if the user had actively requested a balanced accuracy/speed/memory tradeoff when they'd never mentioned priority at all. `matching.py` defaults an unset priority to `"balanced"` only at the actual scoring call site, never in the schema or in what's shown to the LLM.
+
+`user_goal` is a short paraphrase of what the user is trying to achieve, in their own terms (e.g. "best preserves individual cell-type identity after integration") — extracted by Call 1 whenever the user states a motivation beyond the enum fields. It isn't used by `matching.py`'s scoring; it exists so Call 2 can ground `scenario_summary` in what the user actually said instead of inferring intent from field values alone.
 
 ---
 
@@ -273,17 +278,19 @@ UserProfile (stateful across turns)
             │
             ▼
 [Call 2: answer_writer.py — run_recommendation(), a BOUNDED JOINT DECISION]
-  Input:  user profile + matched_datasets (with actual benchmark fields) +
+  Input:  user profile (priority=null unless stated; user_goal = user's own words) +
+          matched_datasets (with actual benchmark fields) +
           candidate_methods (the pool — up to top_k methods, each with real composite_score,
           evidence, warnings) + task_score_tables (full scores for matched tasks) +
           method_summaries (candidates' cross-task-category stats)
-  Output: {"selected": [{"method", "sentence"}, × up to 3], "branch_note"}
+  Output: {"scenario_summary", "selected": [{"method", "sentence"}, × up to 3], "summary"}
   Model does: SELECTS and ORDERS the final top-3 from candidate_methods — may reorder or
               prefer a lower-scored candidate (e.g. one with no disqualifying warning, or one
               that's consistently strong per method_summaries rather than a one-task spike) —
-              and writes one grounded sentence per pick
-  Model cannot: name a method outside candidate_methods, or cite a number not present in the
-                data it was given
+              and writes a plain-language sentence per pick (what it is + why it fits)
+  Model cannot: name a method outside candidate_methods; state ANY raw number from
+                candidate_methods/task_score_tables/method_summaries in its output text; claim
+                a priority the user never stated; explain its own selection methodology
             │
             ▼
     _resolve_selection() validates the model's output against candidate_methods (hallucination
@@ -295,7 +302,7 @@ UserProfile (stateful across turns)
     call failed entirely).
 ```
 
-`candidate_methods` — not the LLM's training knowledge, and not an unbounded free-form catalogue — is the ceiling on what can ever appear in the final answer: it is computed deterministically (weighted similarity + composite score, no embeddings; the corpus is small and structured enough for exact field/task-ID matching) before the LLM is ever called. `task_score_tables` and `method_summaries` are additional retrieved grounding context that inform the LLM's judgement without expanding what it's allowed to select from.
+`candidate_methods` — not the LLM's training knowledge, and not an unbounded free-form catalogue — is the ceiling on what can ever appear in the final answer: it is computed deterministically (weighted similarity + composite score, no embeddings; the corpus is small and structured enough for exact field/task-ID matching) before the LLM is ever called. `task_score_tables` and `method_summaries` are additional retrieved grounding context that inform the LLM's judgement without expanding what it's allowed to select from — and, critically, without ever being quoted back to the user (9.2).
 
 ### 9.1 Model resolution
 
@@ -303,15 +310,19 @@ Both modules resolve the model ID at runtime by calling `/v1/models` and matchin
 
 ### 9.2 Answer format (Call 2)
 
-The LLM's raw output is strict JSON (`{"selected": [...], "branch_note": ...}`) — not the display text directly. `answer_writer._format_answer()` assembles the final display from the validated selection, guaranteeing the format regardless of what the model writes:
+The LLM's raw output is strict JSON (`{"scenario_summary", "selected": [...], "summary"}`) — not the display text directly. `answer_writer._format_answer()` assembles the final display from the validated selection, guaranteeing the format regardless of what the model writes:
 ```
-1. **Method** — one grounded sentence (LLM's choice + wording).
-2. **Method** — one grounded sentence.
-3. **Method** — one grounded sentence.
-```
-No intro line, no scenario description, no benchmark explanation, no closing sentence beyond an optional one-line `branch_note`. If a warning applies (embedding mismatch, failed run), it is woven into that method's own sentence by the model.
+<one sentence: the user's scenario/goal, in the model's own words>
 
-Any slot the model's selection didn't validly fill (see 9.3) gets a synthesized fallback sentence (`composite score {score}`) instead of the model's prose, so the display never has a blank or broken line.
+1. **Method** — 1-2 sentences: what it is, why it fits (no raw numbers).
+2. **Method** — same.
+3. **Method** — same.
+
+<one closing sentence — e.g. a tradeoff, or how the three compare>
+```
+No section headers, no benchmark explanation, and — deliberately — **no mention of how the recommendation was produced**: `candidate_methods`, `task_score_tables`, `method_summaries`, `confidence_note`, `matched_branch`, and `decision_tree_crossref` are sent to the LLM purely as reasoning material; the prompt explicitly forbids repeating or alluding to any of them (no "this is a published branch answer," no "based on the candidate pool," no composite scores or metric names). The user gets a recommendation, not an explanation of the recommender. If a warning applies (embedding mismatch, failed run), its substance is woven into that method's own sentence in plain language, not cited as a score caveat.
+
+Any slot the model's selection didn't validly fill (see 9.3) gets a qualitative fallback sentence (`answer_writer._fallback_sentence()` — e.g. "selected by the benchmark's deterministic ranking for this scenario") instead of the model's prose — never a raw number — so the display never has a blank line or a leaked score.
 
 ### 9.3 Hallucination prevention — two layers
 

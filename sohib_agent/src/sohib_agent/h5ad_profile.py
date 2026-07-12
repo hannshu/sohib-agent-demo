@@ -9,6 +9,11 @@ Tier 3 (heuristic): best-effort inference when Tier 2 finds nothing.
          in matching. Currently implemented:
            - species: inferred from gene-symbol capitalisation convention
            - st_category: inferred from feature count (sST ≥ threshold, iST < threshold)
+           - omics_type: inferred from var_names patterns (peak coordinates → epigenomics,
+             numeric m/z-style names → metabolomics, small antibody panel → proteomics,
+             gene-symbol-like names → transcriptomics). Left null (caller asks the user) when
+             the pattern is inconclusive — omics_type is a gating field, so a wrong guess here
+             is worse than asking.
 
 Not implemented (scoped out for this pass):
   - batch_effect_severity: requires a batch-mixing diagnostic (e.g. iLISI/kBET) against a
@@ -24,6 +29,7 @@ profile dict via _multi_batch_aggregate = True.
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import anndata as ad
@@ -35,8 +41,18 @@ _TISSUE_ALIASES   = ["tissue", "organ", "tissue_type", "anatomical_region"]
 _SPECIES_ALIASES  = ["species", "organism", "organism_ontology_term_id"]
 _TECH_ALIASES     = ["technology", "platform", "seq_platform", "sequencing_platform",
                       "assay", "assay_ontology_term_id", "protocol"]
+_OMICS_ALIASES    = ["omics_type", "omics", "modality", "feature_type", "assay_type", "data_type"]
 _BATCH_ALIASES    = ["batch", "sample", "sample_id", "slice_id", "section",
                       "donor_id", "patient_id", "library_id"]
+
+# Recognized omics_type values a Tier 2 metadata scan may find verbatim (case-insensitive).
+_OMICS_TYPE_VALUES = {"transcriptomics", "proteomics", "metabolomics", "epigenomics"}
+
+# Tier 3 heuristic for omics_type inference from var_names patterns.
+_PEAK_NAME_PATTERN = re.compile(r"^(chr)?[0-9xym]+[:_-]\d+[-_]\d+$", re.IGNORECASE)
+# Imaging-based proteomics panels (CODEX/MIBI) profile tens to ~a hundred markers — far below
+# even the smallest iST gene panels, which is what makes this cutoff a usable signal.
+_PROTEOMICS_PANEL_SIZE_CUTOFF = 100
 
 # Tier 3 heuristic threshold for st_category inference.
 # Imaging-based ST (iST) uses targeted panels (roughly hundreds to ~a few thousand genes).
@@ -130,6 +146,45 @@ def _infer_species_from_var_names(adata: ad.AnnData) -> str | None:
     return None
 
 
+def _infer_omics_type_from_var_names(adata: ad.AnnData) -> str | None:
+    """
+    Tier 3 heuristic: infer omics_type from var_names naming patterns.
+    Returns "epigenomics", "metabolomics", "proteomics", "transcriptomics", or None (inconclusive).
+    Checked in this order because each pattern is a more specific/confident signal than the next:
+      1. genomic peak coordinates (e.g. "chr1:100000-100500") → epigenomics (ATAC/ChIP-style)
+      2. numeric feature names (e.g. m/z values like "756.5522") → metabolomics (MALDI/MSI)
+      3. small feature count (<= _PROTEOMICS_PANEL_SIZE_CUTOFF) → proteomics (antibody panel)
+      4. gene-symbol-like alphabetic names → transcriptomics (the common case)
+    """
+    var_names = [str(n) for n in adata.var_names[:500]]
+    if not var_names:
+        return None
+
+    peak_count = sum(1 for n in var_names if _PEAK_NAME_PATTERN.match(n))
+    if peak_count / len(var_names) >= 0.6:
+        return "epigenomics"
+
+    def _is_numeric(n: str) -> bool:
+        try:
+            float(n)
+            return True
+        except ValueError:
+            return False
+
+    numeric_count = sum(1 for n in var_names if _is_numeric(n))
+    if numeric_count / len(var_names) >= 0.6:
+        return "metabolomics"
+
+    if len(adata.var_names) <= _PROTEOMICS_PANEL_SIZE_CUTOFF:
+        return "proteomics"
+
+    alpha_names = [n for n in var_names if n.isalpha() and len(n) >= 2]
+    if len(alpha_names) / len(var_names) >= 0.6:
+        return "transcriptomics"
+
+    return None
+
+
 def _infer_st_category_from_feature_count(n_vars: int) -> str | None:
     """
     Tier 3 heuristic: estimate st_category from feature count.
@@ -167,12 +222,18 @@ def extract_tier2(adata: ad.AnnData) -> dict:
 
     Fields not found here stay None and are requested from the user via the text path.
     tissue and exact technology are not inferred — no reliable structural signal exists.
+    omics_type is inferred from var_names patterns (Tier 3) when no explicit metadata column
+    names it; if that's also inconclusive it stays None, since it's a gating field and a wrong
+    guess would corrupt matching more than asking the user costs.
     """
     # Tier 2: confirmed fields from explicit metadata
     tissue_val    = _scan_obs(adata, _TISSUE_ALIASES)   or _scan_uns(adata, _TISSUE_ALIASES)
     species_val   = _scan_obs(adata, _SPECIES_ALIASES)  or _scan_uns(adata, _SPECIES_ALIASES)
     tech_val      = _scan_obs(adata, _TECH_ALIASES)     or _scan_uns(adata, _TECH_ALIASES)
     batch_val     = _scan_obs(adata, _BATCH_ALIASES)    or _scan_uns(adata, _BATCH_ALIASES)
+    omics_val     = _scan_obs(adata, _OMICS_ALIASES)    or _scan_uns(adata, _OMICS_ALIASES)
+    if omics_val is not None and omics_val.lower() not in _OMICS_TYPE_VALUES:
+        omics_val = None  # metadata column existed but didn't hold a recognized omics_type value
 
     # Tier 3: infer species from gene names if metadata not found
     if species_val is None:
@@ -181,15 +242,23 @@ def extract_tier2(adata: ad.AnnData) -> dict:
     else:
         species_field = _wrap(species_val, "confirmed")
 
+    # Tier 3: infer omics_type from var_names patterns if metadata not found
+    if omics_val is None:
+        inferred_omics = _infer_omics_type_from_var_names(adata)
+        omics_field = _wrap(inferred_omics, "inferred") if inferred_omics else None
+    else:
+        omics_field = _wrap(omics_val.lower(), "confirmed")
+
     # tissue and technology: remain None — no reliable heuristic
     tissue_field = _wrap(tissue_val, "confirmed") if tissue_val is not None else None
     tech_field   = _wrap(tech_val,   "confirmed") if tech_val   is not None else None
 
     return {
-        "tissue":    tissue_field,
-        "species":   species_field,
+        "tissue":     tissue_field,
+        "species":    species_field,
         "technology": tech_field,
-        "batch_id":  batch_val,
+        "omics_type": omics_field,
+        "batch_id":   batch_val,
     }
 
 

@@ -24,6 +24,17 @@ The two most important fields (always ask for these first if missing):
   - CODEX / MIBI → omics_type: "proteomics"
   - MALDI / MSI → omics_type: "metabolomics"
   - ATAC / histone / chromatin → omics_type: "epigenomics"
+- `batch_effect_severity`: only set this when the user describes integrating/combining multiple
+  slices, batches, or samples — a single, standalone dataset has no batch effect to describe.
+  When they do, classify by whether different technologies are involved:
+  - Same technology/platform across all batches (e.g. "3 Visium slides", "multiple MERFISH runs") → "minimal"
+  - Different technologies, both imaging-based (iST + iST, e.g. MERFISH + STARMap) → "moderate"
+  - Different technologies of different classes (sST + iST, e.g. Visium + Xenium, Slide-seq + MERFISH) → "maximal"
+  - Explicit severity language ("strong/severe batch effects", "minor batch differences") → map directly to maximal/minimal.
+  If batches are mentioned but nothing about same/different technology is stated or implied, leave
+  this null rather than guessing — do not default it to "minimal" yourself either: when the user
+  never mentions batches/integration at all, the downstream matching pipeline already assumes
+  "minimal" (same-technology) on its own, so setting it here would be redundant guessing.
 - Never guess fields not stated or clearly implied.
 - `priority` (accuracy / speed / memory / balanced): only set this if the user explicitly says something about speed, runtime, memory/RAM limits, or explicitly prioritizing accuracy — e.g. "needs to run fast", "limited GPU memory", "accuracy matters most". Do NOT set it just because the message doesn't mention priority at all — leave it null (unset) rather than default to "balanced". A concrete value here is read downstream as "the user asked for this tradeoff", so never invent one.
 - `user_goal`: a short (≤ 20 words) paraphrase, in the user's own terms, of what they're ultimately trying to achieve or why — beyond what the structured fields already capture. Extract this whenever the user states a motivation, downstream use, or specific concern (e.g. "best preserves individual cell-type identity after integration", "robust to strong batch effects between slides", "want to compare rare cell populations"). This is the main way the user's actual intent reaches the final recommendation, since the structured fields alone are lossy — capture it whenever there's substance beyond the enum values, but don't fabricate one from a message that only supplies structured facts (e.g. "Visium mouse brain, 4000 spots" has no user_goal to extract).
@@ -44,3 +55,9 @@ User: "I have a single-cell-resolution MERFISH mouse brain dataset with about 12
 
 User: "it needs to run fast, I don't have much GPU memory"
 → {"priority": "speed"}
+
+User: "I'm combining 3 Visium slides from different patients"
+→ {"technology": "Visium", "st_category": "sST", "batch_effect_severity": "minimal"}
+
+User: "trying to integrate a MERFISH dataset with a Visium dataset of the same tissue"
+→ {"batch_effect_severity": "maximal", "user_goal": "integrate MERFISH and Visium data of the same tissue"}

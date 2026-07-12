@@ -34,6 +34,13 @@ _RAW_DIR = Path(__file__).parent.parent.parent / "data" / "raw"
 
 _AGENT_TAG = "[bold magenta]Agent>[/bold magenta] "
 
+# h5ad Tier-3 fields whose inferred value is surfaced for user confirmation before recommending
+# (high-weight or gating fields only — a wrong guess here materially affects matching).
+_INFERENCE_EXPLANATION = {
+    "species": "gene-symbol naming convention",
+    "omics_type": "feature-name (var_names) patterns",
+}
+
 
 def _agent_say(message: str) -> None:
     """Print agent-originated text with a visible tag, mirroring the 'You>' input prompt, so
@@ -64,6 +71,14 @@ def _run_recommendation(profile: UserProfile, kb: dict) -> RecommendationResult:
     dataset_profiles = kb["dataset_profiles"]
     method_scores = kb["method_scores"]
     cell_level_scores = kb.get("cell_level_scores", {})
+
+    # batch_effect_severity is never nagged for (see models._HIGH_VALUE_FIELDS): if the user
+    # never described integrating data from different technologies, assume "minimal" (same-tech)
+    # for matching purposes rather than asking. Kept as a local override — the profile object
+    # itself stays truthful (None means "not stated") for /profile and the LLM narration payload.
+    batch_defaulted = profile.batch_effect_severity is None
+    if batch_defaulted:
+        profile = profile.model_copy(update={"batch_effect_severity": "minimal"})
 
     # Step 1: decision tree — used as annotation only, never as the source of candidate_methods.
     # For domain-level profiles with enough fields, the fine-grained similarity matcher below
@@ -120,6 +135,15 @@ def _run_recommendation(profile: UserProfile, kb: dict) -> RecommendationResult:
         dt_crossref = (
             f"SOHIB decision-tree branch '{branch['branch']}' also matches this profile "
             f"({branch['description']}). This is a cross-reference, not the source of the candidate pool above."
+        )
+
+    if batch_defaulted and not is_static:
+        # The static cell-level branch answer (see rank_methods_cell_level) doesn't read any
+        # profile field, including batch_effect_severity — nothing to disclose in that case.
+        confidence_note += (
+            " batch_effect_severity was not stated, so 'minimal' (same-technology integration) "
+            "was assumed for matching; mention it explicitly (e.g. combining data from different "
+            "platforms) if that's not the case."
         )
 
     baseline = candidates if is_static else top_k_by_composite_score(candidates, 3)
@@ -217,20 +241,38 @@ def _relevant_optional_fields(profile: UserProfile, kb: dict) -> list[str]:
     return profile.missing_optional_fields()
 
 
-def _ask_missing_fields(profile: UserProfile, kb: dict, header: str) -> bool:
+def _ask_missing_fields(profile: UserProfile, kb: dict) -> bool:
     """
-    Batch all still-missing gating + high-value fields into one grouped question.
+    Batch all still-missing gating + high-value fields into one grouped question. Used by every
+    input path (free text, /upload, or a mix of both across turns) so the number and phrasing of
+    follow-up questions never depends on which order the user supplied information in — data then
+    text, text then data, or interleaved all land here the same way.
     Returns True if anything was asked (i.e. the caller should wait for a reply
     instead of recommending immediately).
     """
-    questions = profile.missing_required_fields() + _relevant_optional_fields(profile, kb)
-    if not questions:
+    required = profile.missing_required_fields()
+    optional = _relevant_optional_fields(profile, kb)
+    if not required and not optional:
         return False
 
+    header = (
+        "A few required details are still missing before I can recommend:" if required else
+        "I can give a recommendation now, but a few more details would make it more reliable:"
+    )
     lines = [header]
-    for q in questions:
+    # Only required-field descriptions are authored as "field (question text?)" — the optional
+    # (high-value) descriptions in models._HIGH_VALUE_FIELDS are example/hint text, not always in
+    # that shape (e.g. st_category has nested parens), so only the former go through the
+    # question-ifying formatter; the latter are shown as-is, same as before this was batched.
+    for q in required:
+        lines.append(f"  • {_format_missing_field_question(q)}")
+    for q in optional:
         lines.append(f"  • {q}")
-    lines.append("Use /set field=value, describe them in your next message, or type /recommend to use what's given.")
+    lines.append(
+        "Describe them in your next message, upload a .h5ad, or use /set field=value."
+        if required else
+        "Use /set field=value, describe them in your next message, or type /recommend to use what's given."
+    )
     _agent_say("\n".join(lines))
     return True
 
@@ -299,9 +341,7 @@ def chat(no_llm: bool) -> None:
                 asked_optional = True
                 _do_recommend(profile, kb, no_llm)
             else:
-                asked_optional = _ask_missing_fields(
-                    profile, kb, "To improve the recommendation, please provide:"
-                )
+                asked_optional = _ask_missing_fields(profile, kb)
             continue
 
         if line.startswith("/set "):
@@ -347,9 +387,9 @@ def chat(no_llm: bool) -> None:
             continue
 
         if not profile.is_ready_for_recommendation():
-            # Still missing a gating field — ask for the single next-most-important one.
-            missing = profile.missing_required_fields()
-            _agent_say(_format_missing_field_question(missing[0]))
+            # Still missing a gating field — batch it (and any relevant optional fields) into
+            # one grouped question, same as the /upload path, rather than asking one at a time.
+            asked_optional = _ask_missing_fields(profile, kb)
             continue
 
         if not asked_optional and _relevant_optional_fields(profile, kb):
@@ -360,10 +400,7 @@ def chat(no_llm: bool) -> None:
             # cell-level queries with no cell-level score data — nothing left to ask would
             # change that answer (see _relevant_optional_fields).
             asked_optional = True
-            _ask_missing_fields(
-                profile, kb,
-                "I can give a recommendation now, but a few more details would make it more reliable:",
-            )
+            _ask_missing_fields(profile, kb)
             continue
 
         _do_recommend(profile, kb, no_llm)
@@ -464,7 +501,10 @@ def _do_upload(path: str, description: str | None, profile: UserProfile, kb: dic
             updated_confirmed.append(f"{key}={v}")
 
     # Metadata fields may be confirmed or inferred
-    for src_key, dst_key in (("tissue", "tissue"), ("species", "species"), ("technology", "technology")):
+    for src_key, dst_key in (
+        ("tissue", "tissue"), ("species", "species"), ("technology", "technology"),
+        ("omics_type", "omics_type"),
+    ):
         field = extracted.get(src_key)
         if field is None:
             continue
@@ -494,12 +534,13 @@ def _do_upload(path: str, description: str | None, profile: UserProfile, kb: dic
         f"[green]Loaded {p.name}.[/green] Updated: {', '.join(updated_confirmed) or 'nothing new'}"
     )
 
-    # Surface inferred fields for user confirmation (high-weight fields only: species)
-    high_weight_inferred = [(k, v) for k, v in inferred_fields if k == "species"]
+    # Surface inferred fields for user confirmation (high-weight/gating fields only)
+    high_weight_inferred = [(k, v) for k, v in inferred_fields if k in _INFERENCE_EXPLANATION]
     for field_name, field_val in high_weight_inferred:
         _agent_say(
-            f"[yellow]Inferred {field_name}=[bold]{field_val}[/bold] from gene-symbol naming convention "
-            f"— is that correct? (Use /set {field_name}=<value> to correct, or continue.)[/yellow]"
+            f"[yellow]Inferred {field_name}=[bold]{field_val}[/bold] from "
+            f"{_INFERENCE_EXPLANATION[field_name]} — is that correct? "
+            f"(Use /set {field_name}=<value> to correct, or continue.)[/yellow]"
         )
 
     return profile

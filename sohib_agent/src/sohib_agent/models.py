@@ -4,12 +4,17 @@ from typing import Literal, Optional
 # Non-gating but high-weight fields (see matching._WEIGHTS): missing these doesn't block
 # a recommendation, but filling them in materially improves match quality. Used to decide
 # whether to ask one more round of questions before answering, or answer immediately.
+#
+# batch_effect_severity is deliberately NOT in this list: rather than nag for it, the agent
+# assumes "minimal" (same-technology integration) whenever it's unset, and only escalates to
+# moderate/maximal when the user explicitly describes combining different technologies/platforms
+# (see extract_profile.md's batch_effect_severity rule and cli._run_recommendation's default-fill,
+# which both apply and disclose this assumption instead of asking).
 _HIGH_VALUE_FIELDS: list[tuple[str, str]] = [
     ("technology", "technology (e.g. Visium, MERFISH, Slide-seq, STARMap, Xenium, CosMx)"),
     ("species", "species (human / mouse / other)"),
     ("st_category", "sST (sequencing-based, whole-transcriptome) or iST (imaging-based, targeted panel)"),
     ("num_locations", "approx. number of cells/spots per section"),
-    ("batch_effect_severity", "batch_effect_severity (minimal / moderate / maximal) — leave blank if this is a single sample with no batch to integrate"),
 ]
 
 
