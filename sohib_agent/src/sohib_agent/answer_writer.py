@@ -15,12 +15,19 @@ any selected method not present in the pool is dropped. If validation leaves few
 the whole call fails), missing slots are backfilled deterministically via
 matching.top_k_by_composite_score, so a malformed or hallucinated response degrades gracefully
 to the deterministic ranking instead of shipping a fabricated method.
+
+Raw benchmark numbers (composite_score, overall/BPC/BER/SPC/DTP, similarity, etc.) are sent TO
+the LLM as grounding evidence, but are deliberately NOT surfaced in the text shown back to the
+USER — the model reasons over them internally and writes a plain-language blurb (what the method
+is, why it fits) instead of quoting scores. _format_answer() controls the final shape: one
+scenario-summary sentence, up to 3 numbered method blurbs, one closing summary sentence.
 """
 from __future__ import annotations
 
 import json
 import os
 from pathlib import Path
+from typing import NamedTuple
 
 from .matching import top_k_by_composite_score
 from .models import RecommendationResult, UserProfile
@@ -102,7 +109,8 @@ def _validate_selection(selected_raw, candidates: list[dict]) -> list[dict]:
     """
     Hallucination guard: keep only LLM-selected entries whose method name is present in the
     real candidate pool. Real composite_score/evidence/warnings always come from the candidate
-    dict, never from the LLM — only the free-text "sentence" is taken from the model's output.
+    dict, never from the LLM — only the free-text "sentence" (the user-facing blurb: what the
+    method is + why it fits, no raw numbers) is taken from the model's output.
     """
     if not isinstance(selected_raw, list):
         return []
@@ -122,19 +130,31 @@ def _validate_selection(selected_raw, candidates: list[dict]) -> list[dict]:
     return validated
 
 
-def _resolve_selection(raw_text: str, candidates: list[dict], k: int = 3) -> tuple[list[dict], str | None, bool]:
+class ResolvedSelection(NamedTuple):
+    selected: list[dict]
+    scenario_summary: str | None
+    summary: str | None
+    branch_note: str | None
+    is_fully_llm_selected: bool
+
+
+def _resolve_selection(raw_text: str, candidates: list[dict], k: int = 3) -> ResolvedSelection:
     """
     Parse + validate the LLM's response against candidates. Backfills any slots the LLM's
-    selection didn't validly fill using the deterministic ranking, so the result always has
-    up to k entries drawn only from the real candidate pool.
-    Returns (selected, branch_note, is_fully_llm_selected).
+    selection didn't validly fill using the deterministic ranking (no raw score exposed — see
+    _fallback_sentence), so the result always has up to k entries drawn only from the real
+    candidate pool.
     """
     target = min(k, len(candidates))
+    scenario_summary = None
+    summary = None
     branch_note = None
     validated: list[dict] = []
     try:
         parsed = json.loads(_strip_fences(raw_text))
         validated = _validate_selection(parsed.get("selected"), candidates)
+        scenario_summary = parsed.get("scenario_summary")
+        summary = parsed.get("summary")
         branch_note = parsed.get("branch_note")
     except (json.JSONDecodeError, AttributeError, TypeError):
         pass
@@ -149,20 +169,38 @@ def _resolve_selection(raw_text: str, candidates: list[dict], k: int = 3) -> tup
                 break
             validated.append({**c, "sentence": None})
 
-    return validated, branch_note, is_fully_llm_selected
+    return ResolvedSelection(validated, scenario_summary, summary, branch_note, is_fully_llm_selected)
 
 
-def _format_answer(selected: list[dict], branch_note: str | None) -> str:
+def _fallback_sentence(entry: dict) -> str:
+    """
+    Qualitative-only stand-in for a slot the LLM didn't validly fill. Never surfaces a raw
+    score to the user — this is the deterministic ranking's pick, described in plain language.
+    """
+    if entry.get("composite_score") is None:
+        return "one of the SOHIB benchmark's published top methods for this scenario."
+    return "selected by the benchmark's deterministic ranking for this scenario."
+
+
+def _format_answer(resolved: ResolvedSelection) -> str:
+    """
+    Assembles the user-facing text: one scenario sentence, then each method with a plain-language
+    blurb (what it is + why it fits — no raw benchmark numbers), then a closing summary sentence.
+    The model's JSON output never reaches the user directly; this function controls the format.
+    """
     lines = []
-    for i, entry in enumerate(selected, start=1):
-        sentence = entry.get("sentence")
-        if not sentence:
-            score = entry.get("composite_score")
-            sentence = f"composite score {score}" if score is not None else "SOHIB decision-tree branch (static)"
-        lines.append(f"{i}. **{entry['method']}** — {sentence}")
-    if branch_note:
+    if resolved.scenario_summary:
+        lines.append(str(resolved.scenario_summary))
         lines.append("")
-        lines.append(str(branch_note))
+    for i, entry in enumerate(resolved.selected, start=1):
+        sentence = entry.get("sentence") or _fallback_sentence(entry)
+        lines.append(f"{i}. **{entry['method']}** — {sentence}")
+    if resolved.summary:
+        lines.append("")
+        lines.append(str(resolved.summary))
+    if resolved.branch_note:
+        lines.append("")
+        lines.append(str(resolved.branch_note))
     return "\n".join(lines)
 
 
@@ -224,11 +262,11 @@ def run_recommendation(
     )
     raw_text = response.content[0].text.strip()
 
-    selected, branch_note, is_fully_llm_selected = _resolve_selection(raw_text, candidates, k=3)
-    selected_names = {s["method"] for s in selected}
+    resolved = _resolve_selection(raw_text, candidates, k=3)
+    selected_names = {s["method"] for s in resolved.selected}
     discarded = [c for c in candidates if c["method"] not in selected_names]
 
-    selection_source = "llm_joint" if is_fully_llm_selected else "deterministic_fallback"
+    selection_source = "llm_joint" if resolved.is_fully_llm_selected else "deterministic_fallback"
     confidence_note = result.confidence_note
     if selection_source == "deterministic_fallback":
         confidence_note += (
@@ -238,9 +276,9 @@ def run_recommendation(
         )
 
     updated = result.model_copy(update={
-        "recommended_methods": selected,
+        "recommended_methods": resolved.selected,
         "discarded_methods": discarded,
         "selection_source": selection_source,
         "confidence_note": confidence_note,
     })
-    return updated, _format_answer(selected, branch_note)
+    return updated, _format_answer(resolved)

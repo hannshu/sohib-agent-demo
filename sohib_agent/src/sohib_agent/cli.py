@@ -31,6 +31,14 @@ console = Console()
 _KB_PATH = Path(__file__).parent.parent.parent / "data" / "clean" / "knowledge_base.json"
 _RAW_DIR = Path(__file__).parent.parent.parent / "data" / "raw"
 
+_AGENT_TAG = "[bold magenta]Agent>[/bold magenta] "
+
+
+def _agent_say(message: str) -> None:
+    """Print agent-originated text with a visible tag, mirroring the 'You>' input prompt, so
+    it's unambiguous which lines are the user's own input vs. the agent's response."""
+    console.print(_AGENT_TAG + message)
+
 
 def _ensure_kb() -> dict:
     if not _KB_PATH.exists():
@@ -183,7 +191,7 @@ def _ask_missing_fields(profile: UserProfile, header: str) -> bool:
     for q in questions:
         lines.append(f"  • {q}")
     lines.append("Use /set field=value, describe them in your next message, or type /recommend to use what's given.")
-    console.print("\n".join(lines))
+    _agent_say("\n".join(lines))
     return True
 
 
@@ -218,7 +226,7 @@ def chat(no_llm: bool) -> None:
 
         # ── slash commands ────────────────────────────────────────────────────
         if line == "/quit" or line == "/exit":
-            console.print("[dim]Goodbye.[/dim]")
+            _agent_say("[dim]Goodbye.[/dim]")
             break
 
         if line == "/profile":
@@ -228,13 +236,13 @@ def chat(no_llm: bool) -> None:
         if line == "/reset":
             profile = UserProfile()
             asked_optional = False
-            console.print("[yellow]Profile reset.[/yellow]")
+            _agent_say("[yellow]Profile reset.[/yellow]")
             continue
 
         if line == "/recommend":
             missing = profile.missing_required_fields()
             if missing:
-                console.print(
+                _agent_say(
                     "[red]Cannot recommend yet. Still need:[/red]\n"
                     + "\n".join(f"  • {m}" for m in missing)
                 )
@@ -264,14 +272,14 @@ def chat(no_llm: bool) -> None:
                 current = profile.model_dump()
                 current[k.strip()] = v.strip()
                 profile = UserProfile(**current)
-                console.print(f"[green]Set {k.strip()} = {v.strip()}[/green]")
+                _agent_say(f"[green]Set {k.strip()} = {v.strip()}[/green]")
             except Exception as e:
-                console.print(f"[red]Error: {e}[/red]")
+                _agent_say(f"[red]Error: {e}[/red]")
             continue
 
         # ── free-text message ─────────────────────────────────────────────────
         if no_llm:
-            console.print(
+            _agent_say(
                 "[dim]LLM disabled. Use /set field=value to update your profile, "
                 "then /recommend.[/dim]"
             )
@@ -281,12 +289,12 @@ def chat(no_llm: bool) -> None:
             try:
                 extracted = extract_profile_from_text(line, profile)
             except Exception as e:
-                console.print(f"[red]LLM call failed: {e}[/red]")
+                _agent_say(f"[red]LLM call failed: {e}[/red]")
                 continue
 
         # LLM returned a clarifying question instead of fields
         if "clarify" in extracted:
-            console.print(extracted["clarify"])
+            _agent_say(extracted["clarify"])
             continue
 
         try:
@@ -295,13 +303,13 @@ def chat(no_llm: bool) -> None:
             # LLM emitted a value outside the profile's allowed schema (e.g. a typo'd
             # literal) — surface it and keep the previous, still-valid profile rather
             # than crashing the session.
-            console.print(f"[red]Could not apply extracted fields ({e}). Ignoring this turn.[/red]")
+            _agent_say(f"[red]Could not apply extracted fields ({e}). Ignoring this turn.[/red]")
             continue
 
         if not profile.is_ready_for_recommendation():
             # Still missing a gating field — ask for the single next-most-important one.
             missing = profile.missing_required_fields()
-            console.print(_format_missing_field_question(missing[0]))
+            _agent_say(_format_missing_field_question(missing[0]))
             continue
 
         if not asked_optional and profile.missing_optional_fields():
@@ -340,14 +348,14 @@ def _do_recommend(profile: UserProfile, kb: dict, no_llm: bool) -> None:
                 method_scores=kb.get("method_scores"),
                 method_summaries=kb.get("method_summaries"),
             )
-            console.print(answer)
+            _agent_say(answer)
             if result.selection_source == "deterministic_fallback" and result.candidate_methods:
                 console.print(
-                    "[dim](LLM selection did not fully validate against the candidate pool — "
-                    "some or all slots used the deterministic ranking instead.)[/dim]"
+                    "[dim](Some picks used the benchmark's deterministic ranking instead of "
+                    "a full LLM judgement.)[/dim]"
                 )
         except Exception as e:
-            console.print(f"[red]Recommendation call failed: {e}[/red] Showing the deterministic candidate pool instead.")
+            _agent_say(f"[red]Recommendation call failed: {e}[/red] Showing the deterministic candidate pool instead.")
             import json
             console.print(Syntax(
                 json.dumps(result.model_dump(), indent=2),
@@ -367,34 +375,34 @@ def _do_upload(path: str, description: str | None, profile: UserProfile, kb: dic
     """
     p = Path(path)
     if not p.exists():
-        console.print(f"[red]File not found: {path}[/red]")
+        _agent_say(f"[red]File not found: {path}[/red]")
         return profile
 
     with console.status(f"Reading {p.name}…"):
         try:
             extracted = load_and_extract(p)
         except Exception as e:
-            console.print(f"[red]Failed to read h5ad: {e}[/red]")
+            _agent_say(f"[red]Failed to read h5ad: {e}[/red]")
             return profile
 
     # Warn about multi-batch before updating profile
     if extracted.get("_multi_batch_aggregate"):
-        console.print(f"[yellow]Warning:[/yellow] {extracted['_multi_batch_note']}")
+        _agent_say(f"[yellow]Warning:[/yellow] {extracted['_multi_batch_note']}")
 
     current = profile.model_dump()
     used_text = False
 
     if description and no_llm:
-        console.print("[dim]--no-llm mode: description text ignored, using only h5ad-derived fields.[/dim]")
+        _agent_say("[dim]--no-llm mode: description text ignored, using only h5ad-derived fields.[/dim]")
     elif description:
         with console.status("Reading description…"):
             try:
                 text_extracted = extract_profile_from_text(description, profile)
             except Exception as e:
-                console.print(f"[red]Description extraction failed: {e}[/red]")
+                _agent_say(f"[red]Description extraction failed: {e}[/red]")
                 text_extracted = {}
         if "clarify" in text_extracted:
-            console.print(text_extracted["clarify"])
+            _agent_say(text_extracted["clarify"])
         else:
             for k, v in text_extracted.items():
                 if v is not None and k in current:
@@ -437,17 +445,17 @@ def _do_upload(path: str, description: str | None, profile: UserProfile, kb: dic
     try:
         profile = UserProfile(**current)
     except Exception as e:
-        console.print(f"[red]Could not apply extracted fields ({e}). Keeping previous profile.[/red]")
+        _agent_say(f"[red]Could not apply extracted fields ({e}). Keeping previous profile.[/red]")
         return profile
 
-    console.print(
+    _agent_say(
         f"[green]Loaded {p.name}.[/green] Updated: {', '.join(updated_confirmed) or 'nothing new'}"
     )
 
     # Surface inferred fields for user confirmation (high-weight fields only: species)
     high_weight_inferred = [(k, v) for k, v in inferred_fields if k == "species"]
     for field_name, field_val in high_weight_inferred:
-        console.print(
+        _agent_say(
             f"[yellow]Inferred {field_name}=[bold]{field_val}[/bold] from gene-symbol naming convention "
             f"— is that correct? (Use /set {field_name}=<value> to correct, or continue.)[/yellow]"
         )
