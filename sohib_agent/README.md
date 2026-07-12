@@ -84,7 +84,7 @@ This produces `data/clean/knowledge_base.json` — a single JSON file containing
 | `method_scores` | Per-task scores for 42 methods: overall, BPC, BER, SPC, DTP, completion status |
 | `method_summaries` | Pre-computed per-method statistics by category (sST / iST / non-transcriptomic / cross-platform) |
 | `method_metadata` | Deep-learning flag, omics-agnostic flag, embedding type for FuseMap/DECIPHER variants |
-| `cell_level_scores` | Scaffold only — populated once the cell-level score file is supplied |
+| `cell_level_scores` | Per-task cell-level scores for the 16 single-cell-resolution tasks, parsed from `task_{N}.csv`'s `sc_metrics_*` rows |
 
 The raw CSVs are not needed after this step and are excluded from version control via `.gitignore`.
 
@@ -276,7 +276,7 @@ The 13 misses are near-misses within the same top-method cluster (e.g. STAIR vs 
 
 | Gap | Status |
 |---|---|
-| Cell-level ranking | Returns the static SOHIB branch (Scanorama, Harmony, BANKSY) until the per-method cell-level score file is supplied. Supply the CSV and the path activates automatically. |
+| Cell-level ranking | Real computed ranking for queries matching one of the 16 single-cell-resolution tasks (Task_10-24, Task_29). Falls back to the static SOHIB branch (Scanorama, Harmony, BANKSY) for other cell-level queries, or if no cell-level data is supplied at all. |
 | Runtime / memory advice | No timing logs in the benchmark. Binary pass/fail proxy used instead. |
 | Methods outside SOHIB | Only the 42 benchmarked methods are ranked. New methods require a benchmark run. |
 | Failure reasons | Why a method failed on a task is not in the CSVs — only that it failed. |

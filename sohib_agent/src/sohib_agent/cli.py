@@ -18,6 +18,7 @@ from .build_knowledge_base import build
 from .decision_tree import match_branch
 from .h5ad_profile import load_and_extract
 from .matching import (
+    cell_level_data_available,
     find_similar_datasets,
     rank_methods_cell_level,
     rank_methods_domain_level,
@@ -82,11 +83,17 @@ def _run_recommendation(profile: UserProfile, kb: dict) -> RecommendationResult:
         is_static = all(m["composite_score"] is None for m in candidates)
         selection_source = "static_branch" if is_static else "deterministic_fallback"
         if is_static:
+            reason = (
+                "no cell-level score data has been supplied for the benchmark at all"
+                if not cell_level_data_available(cell_level_scores)
+                else "none of the matched benchmark tasks for this profile carry single-cell "
+                     "ground truth (only some tasks do)"
+            )
             confidence_note = (
                 "Cell-level ranking: candidate_methods is the SOHIB benchmark's published branch "
-                "answer (Scanorama, Harmony, BANKSY) — NOT a freshly computed, dataset-matched "
-                "ranking. The per-dataset cell-level score file has not yet been supplied, so "
-                "there is no pool to jointly select from; these three are narrated as-is."
+                f"answer (Scanorama, Harmony, BANKSY) — NOT a freshly computed, dataset-matched "
+                f"ranking, because {reason}. There is no pool to jointly select from; these three "
+                f"are narrated as-is."
             )
         else:
             confidence_note = (
@@ -177,13 +184,46 @@ def _format_missing_field_question(missing_field_desc: str) -> str:
     return question if question.endswith("?") else question + "?"
 
 
-def _ask_missing_fields(profile: UserProfile, header: str) -> bool:
+def _cell_level_would_be_static(profile: UserProfile, kb: dict) -> bool:
+    """
+    True if a cell-level recommendation right now would fall back to the static published
+    branch answer (Scanorama/Harmony/BANKSY) regardless of any further detail the user could
+    supply. Only some tasks carry cell-level data (single-cell-resolution ones — see
+    cell_level_data_available), so this can't be answered from a single global flag: a MERFISH
+    brain query might match a task that has real data (worth asking for more detail) while a
+    Visium cortex query, even with target_resolution=="cell", might not (nothing to ask for).
+    Actually runs the (cheap, pure-Python, no-LLM) matching pipeline to find out.
+    """
+    if profile.target_resolution != "cell":
+        return False
+    cell_level_scores = kb.get("cell_level_scores", {})
+    if not cell_level_data_available(cell_level_scores):
+        return True
+    matched = find_similar_datasets(
+        profile, kb["dataset_profiles"], task_knowledge=kb.get("task_knowledge", {}), top_k=5
+    )
+    candidates, _ = rank_methods_cell_level(profile, matched, cell_level_scores)
+    return all(c.get("composite_score") is None for c in candidates)
+
+
+def _relevant_optional_fields(profile: UserProfile, kb: dict) -> list[str]:
+    """
+    profile.missing_optional_fields(), but suppressed when a cell-level recommendation would
+    fall back to the static branch answer regardless — in that state, no further detail changes
+    the outcome, so asking for it would falsely imply otherwise.
+    """
+    if _cell_level_would_be_static(profile, kb):
+        return []
+    return profile.missing_optional_fields()
+
+
+def _ask_missing_fields(profile: UserProfile, kb: dict, header: str) -> bool:
     """
     Batch all still-missing gating + high-value fields into one grouped question.
     Returns True if anything was asked (i.e. the caller should wait for a reply
     instead of recommending immediately).
     """
-    questions = profile.missing_required_fields() + profile.missing_optional_fields()
+    questions = profile.missing_required_fields() + _relevant_optional_fields(profile, kb)
     if not questions:
         return False
 
@@ -255,12 +295,12 @@ def chat(no_llm: bool) -> None:
             path = rest[0]
             description = rest[1] if len(rest) > 1 else None
             profile = _do_upload(path, description, profile, kb, no_llm)
-            if profile.is_fully_specified():
+            if profile.is_ready_for_recommendation() and not _relevant_optional_fields(profile, kb):
                 asked_optional = True
                 _do_recommend(profile, kb, no_llm)
             else:
                 asked_optional = _ask_missing_fields(
-                    profile, "To improve the recommendation, please provide:"
+                    profile, kb, "To improve the recommendation, please provide:"
                 )
             continue
 
@@ -312,14 +352,16 @@ def chat(no_llm: bool) -> None:
             _agent_say(_format_missing_field_question(missing[0]))
             continue
 
-        if not asked_optional and profile.missing_optional_fields():
+        if not asked_optional and _relevant_optional_fields(profile, kb):
             # Gating fields are satisfied, so a recommendation is already possible — but
             # ask once, in one batched message, for the fields that would make it more
             # reliable. The user can answer, ignore and keep chatting, or type /recommend
-            # to force an answer with what's already given.
+            # to force an answer with what's already given. Suppressed entirely for
+            # cell-level queries with no cell-level score data — nothing left to ask would
+            # change that answer (see _relevant_optional_fields).
             asked_optional = True
             _ask_missing_fields(
-                profile,
+                profile, kb,
                 "I can give a recommendation now, but a few more details would make it more reliable:",
             )
             continue

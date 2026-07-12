@@ -68,11 +68,28 @@ Raw CSVs are not committed. The pre-built `knowledge_base.json` is committed so 
 
 ### 3.3 `task_{N}.csv` — granular pre-aggregation metric table
 
-33 files (one per task). Row names follow prefixes: `batch_metrics_*` (BER), `bio_metrics_*` (BPC), `spatial_metrics_*` (SPC), `downstream_metrics_*` (DTP). Currently used for informational purposes; the `overall_ranks.csv` aggregated scores drive all ranking.
+33 files (one per task; the raw file names are `Task_1.csv` … `Task_33.csv`, row-per-metric / column-per-method, same layout as `overall_ranks.csv`). Row names follow prefixes: `batch_metrics_*` (BER), `bio_metrics_*` (BPC), `spatial_metrics_*` (SPC), `downstream_metrics_*` (DTP) — used only informationally; `overall_ranks.csv`'s aggregated scores drive all domain-level ranking. A fifth prefix, `sc_metrics_*`, is parsed separately — see 3.4.
 
-### 3.4 Cell-level score file — not yet supplied
+### 3.4 Cell-level score file — `sc_metrics_*` rows in `task_{N}.csv`
 
-The benchmark reports cell-level metrics (classification accuracy, macro F1, isolated labels, cLISI, cASW) for single-cell-resolution tasks. Until this file is supplied, cell-level queries fall back to domain-level scores as a proxy. The `cell_level_scores` key in the KB is a scaffold (all nulls) ready to receive the data. Do not approximate from `method_scores` — the benchmark's central finding is that domain-level and cell-level scores are negatively correlated for several methods.
+Only single-cell-resolution tasks carry `sc_metrics_*` rows at all: **16 of the 33 tasks** — `Task_10`–`Task_24` and `Task_29`. Tasks without single-cell ground truth (small-scale sST 1–4, cross-platform batch tasks 25–28, most non-transcriptomic tasks 30–33) simply have no such rows; their absence in `cell_level_scores` is a real fact about the benchmark, not a gap.
+
+Per-slice classifier rows (e.g. `sc_metrics_0_KNN_acc`, `sc_metrics_MsBrainAgingSpatialDonor_1_RF_f1` — the slice-id segment is not standardized across tasks) are **not** parsed; only six fixed, task-independent aggregate rows are (`_parse_cell_level_scores()` in `build_knowledge_base.py`):
+
+| Row | KB field |
+|---|---|
+| `sc_metrics_best_classifier_mean_acc` | `classification_acc` |
+| `sc_metrics_best_classifier_mean_f1` | `classification_f1` |
+| `sc_metrics_cLISI` | `cLISI` |
+| `sc_metrics_isolated_labels` | `isolated_labels` |
+| `sc_metrics_ASW_label` | `ASW_label` |
+| `sc_metrics_best_classifier` | `best_classifier` (categorical: which of KNN/LR/RF scored best) |
+
+`overall_cell_level` — the number `rank_methods_cell_level()` actually ranks by — is `mean(classification_acc, classification_f1)`, the two headline classification metrics for cell-level preservation (CLP): whichever classifier scored best per method-task pair, averaged across accuracy and macro F1. The other four fields are kept as auxiliary evidence, mirroring how BPC/BER/SPC/DTP sit alongside `overall` on the domain-level side. Never approximate `overall_cell_level` from `method_scores` — the benchmark's central finding is that domain-level and cell-level scores are negatively correlated for several methods; `cell_level_scores` is strictly separate.
+
+Six methods are recorded under a different column string in `task_{N}.csv` than in `overall_ranks.csv` (verified by diffing every column name across all 33 files against the 42 canonical names) — normalized by `_normalize_method_name()`: `DECIPHER_niche`→`DECIPHER (niche)`, `DECIPHER_cell`→`DECIPHER (cell)`, `FuseMap_niche`→`FuseMap (niche)`, `FuseMap_cell`→`FuseMap (cell)`, `scGPT_sp`→`scGPT-spatial`, `MENDER_wo_pcs`→`MENDER`.
+
+**Fallback when a query's matched task has no cell-level data.** Even with the file supplied, a cell-level query can still match a task outside the 16 (e.g. Visium cortex tasks 1–4) — `rank_methods_cell_level()` falls back to the static published branch answer (Scanorama, Harmony, BANKSY) in that case too, not just when the file is entirely absent. This can't be decided by a single global "is data available" flag; `cli._cell_level_would_be_static()` actually runs the matching pipeline for the specific profile to find out, since asking the user for more detail is only pointless when *this* query's outcome genuinely can't change.
 
 ### 3.5 Fields hand-encoded from the manuscript
 
@@ -101,9 +118,10 @@ method_summaries     Pre-computed per-method statistics by category (sST / iST /
                      non_transcriptomic / cross_platform). Built once at build-kb time,
                      not recomputed per session.
 
-cell_level_scores    Scaffold only (all nulls). Populated once the cell-level file
-                     is supplied. Strictly separated from method_scores — never derived
-                     from domain-level scores.
+cell_level_scores    Populated for the 16 single-cell-resolution tasks (Task_10-24, Task_29)
+                     from task_{N}.csv's sc_metrics_* rows — see 3.4. Falls back to a
+                     scaffold-only placeholder if those files aren't in raw_dir. Strictly
+                     separated from method_scores — never derived from domain-level scores.
 
 method_metadata      deep_learning, omics_agnostic, architecturally_inapplicable,
                      embedding_type, base_method, category per method.
@@ -216,7 +234,7 @@ On domain-level tasks, the niche variants consistently outperform the cell varia
 
 ### 7.5 Cell-level ranking (`rank_methods_cell_level`)
 
-Completely separate function from domain-level ranking. Reads only from `cell_level_scores`, never from `method_scores`. Until the cell-level score file is supplied, uses domain-level scores from matched tasks as a proxy (clearly noted in the LLM answer). The two functions share no weighting table and do not call each other — this separation prevents domain/cell-level score conflation, which is the benchmark's central finding to expose.
+Completely separate function from domain-level ranking. Reads only from `cell_level_scores`, never from `method_scores` — it does NOT fall back to domain-level scores as a proxy (an earlier draft of this spec said it would; the implementation never did, precisely to avoid the domain/cell conflation the benchmark's central finding warns against). When there's nothing real to rank by — no cell-level data supplied at all, or this profile's matched task isn't among the 16 that carry it (3.4) — it falls back to the static published branch answer (Scanorama, Harmony, BANKSY) instead, clearly flagged via `RecommendationResult.selection_source == "static_branch"`. The two functions share no weighting table and do not call each other.
 
 ---
 
@@ -350,7 +368,7 @@ Leave-one-out across all 33 tasks: remove task, build synthetic profile from its
 
 Both thresholds pass. 13 misses are near-misses within the same top-method cluster (STAIR / STAGATE / GraphPCA all appear in the sST top group). No miss crosses a major category boundary.
 
-Cell-level leave-one-out is not yet run — depends on the cell-level score file (Section 3.4). Results must be reported separately from domain-level, not averaged, to avoid hiding the domain/cell divergence the benchmark exists to measure.
+Cell-level leave-one-out is not yet run — the cell-level score file is now supplied (Section 3.4), so this is implementable, just not yet built. When it is, results must be reported separately from domain-level, not averaged, to avoid hiding the domain/cell divergence the benchmark exists to measure.
 
 ---
 
@@ -358,7 +376,7 @@ Cell-level leave-one-out is not yet run — depends on the cell-level score file
 
 | Item | Status |
 |---|---|
-| Cell-level score file (Section 3.4) | Not yet supplied. Cell-level queries use domain-level proxy. Once supplied, `rank_methods_cell_level` activates automatically. |
+| Cell-level score file (Section 3.4) | Supplied — parsed from `task_{N}.csv`'s `sc_metrics_*` rows for the 16 single-cell-resolution tasks. `rank_methods_cell_level` now returns real computed rankings for queries matching those tasks; other cell-level queries still fall back to the static published branch answer. Cell-level leave-one-out validation (Section 11) not yet built. |
 | Runtime / memory logs | Not available. Binary completion penalty (−0.3) used as proxy. If logs are supplied later, replace the binary penalty with continuous weighting. |
 | 42 vs. 40 method reconciliation | Documented. `DECIPHER (cell)`, `FuseMap (cell)`, `Nicheformer` are the 3 extra rows. All kept in KB, flagged in `_reconciliation_note`. |
 | Cross-slice multiomics integration mode | Out of scope for this version. |

@@ -22,6 +22,101 @@ from .method_metadata import METHOD_METADATA, TASK_CROSS_PLATFORM_INFO
 # These two extra rows are KEPT in method_scores for completeness but flagged here.
 EXTRA_METHODS_VS_MANUSCRIPT = {"DECIPHER (cell)", "FuseMap (cell)"}
 
+# A handful of methods are recorded under a different column string in the per-task granular
+# CSVs (task_{N}.csv, row-per-metric / column-per-method) than in overall_ranks.csv. Verified
+# by diffing every column name seen across all 33 task CSVs against the 42 canonical
+# overall_ranks.csv names — these six are the only mismatches; everything else matches exactly.
+_METHOD_NAME_ALIASES = {
+    "DECIPHER_niche": "DECIPHER (niche)",
+    "DECIPHER_cell": "DECIPHER (cell)",
+    "FuseMap_niche": "FuseMap (niche)",
+    "FuseMap_cell": "FuseMap (cell)",
+    "scGPT_sp": "scGPT-spatial",
+    "MENDER_wo_pcs": "MENDER",
+}
+
+# Aggregate cell-level ("sc_metrics_*") rows present in task_{N}.csv for single-cell-resolution
+# tasks. Per-slice classifier rows (e.g. sc_metrics_0_KNN_acc, sc_metrics_<donor>_1_RF_f1 — the
+# slice-id segment varies by task and isn't needed) are intentionally not parsed; only these
+# fixed, task-independent aggregate rows are, since they're consistently named across every
+# cell-level task and are what best_classifier_mean_acc/f1 already summarize the per-slice
+# classifier runs into.
+_CELL_LEVEL_ROWS = (
+    "sc_metrics_cLISI",
+    "sc_metrics_isolated_labels",
+    "sc_metrics_ASW_label",
+    "sc_metrics_best_classifier",
+    "sc_metrics_best_classifier_mean_acc",
+    "sc_metrics_best_classifier_mean_f1",
+)
+
+
+def _normalize_method_name(raw: str) -> str:
+    return _METHOD_NAME_ALIASES.get(raw, raw)
+
+
+def _parse_cell_level_scores(raw_dir: Path) -> dict[str, dict]:
+    """
+    Parse per-method cell-level metrics from task_{N}.csv-style files (same row-per-metric /
+    column-per-method layout as overall_ranks.csv, just granular per task). Only tasks whose
+    dataset has single-cell ground truth carry `sc_metrics_*` rows at all — tasks without them
+    (small-scale sST, cross-platform batch tasks, most non-transcriptomic tasks) are skipped
+    entirely; that absence is a real fact about the benchmark, not a gap to fill.
+
+    overall_cell_level is the mean of classification accuracy and macro F1 from whichever
+    classifier (KNN/LR/RF) scored best for that method-task pair — the two headline
+    classification metrics the manuscript reports for cell-level preservation (CLP). cLISI /
+    isolated_labels / ASW_label / best_classifier are kept as auxiliary evidence alongside it,
+    mirroring how BPC/BER/SPC/DTP sit alongside "overall" on the domain-level side.
+
+    Returns {} if no task_{N}.csv files are present in raw_dir (e.g. not yet supplied) — the
+    caller falls back to the existing scaffold-only placeholder in that case.
+    """
+    cell_level_scores: dict[str, dict] = {}
+    task_files = sorted(
+        raw_dir.glob("[Tt]ask_*.csv"),
+        key=lambda p: int(re.search(r"(\d+)", p.stem).group(1)),
+    )
+
+    for path in task_files:
+        task_id = f"Task_{re.search(r'(\d+)', path.stem).group(1)}"
+        df = pd.read_csv(path, index_col=0)
+
+        if not any(str(r).startswith("sc_metrics_") for r in df.index):
+            continue  # not a single-cell-resolution task — nothing to report, not missing data
+        if any(row not in df.index for row in _CELL_LEVEL_ROWS):
+            continue  # unexpected/partial sc_metrics_ layout — skip rather than guess
+
+        def _cell(row: str, col: str):
+            val = df.at[row, col]
+            if pd.isna(val):
+                return None
+            return str(val) if row == "sc_metrics_best_classifier" else float(val)
+
+        task_scores: dict[str, dict] = {}
+        for raw_method in df.columns:
+            method = _normalize_method_name(raw_method)
+            acc = _cell("sc_metrics_best_classifier_mean_acc", raw_method)
+            f1 = _cell("sc_metrics_best_classifier_mean_f1", raw_method)
+            if acc is not None and f1 is not None:
+                overall = (acc + f1) / 2
+            else:
+                overall = acc if acc is not None else f1
+
+            task_scores[method] = {
+                "overall_cell_level": round(overall, 4) if overall is not None else None,
+                "classification_acc": acc,
+                "classification_f1": f1,
+                "cLISI": _cell("sc_metrics_cLISI", raw_method),
+                "isolated_labels": _cell("sc_metrics_isolated_labels", raw_method),
+                "ASW_label": _cell("sc_metrics_ASW_label", raw_method),
+                "best_classifier": _cell("sc_metrics_best_classifier", raw_method),
+                "completion_status": "success" if overall is not None else "not_applicable",
+            }
+        cell_level_scores[task_id] = task_scores
+
+    return cell_level_scores
+
 
 def _parse_omics_type(raw: str) -> tuple[str, str | None]:
     """Return (omics_type, st_category) from raw 'Omics type' cell."""
@@ -299,14 +394,19 @@ def build(raw_dir: Path) -> dict:
     ranks_df = ranks_df.reset_index()
     method_scores = _parse_overall_ranks(ranks_df)
 
-    # ── cell_level_scores (scaffold only — data file not yet supplied) ────────
-    cell_level_scores: dict[str, dict] = {
-        "_comment": (
-            "Populated only for single-cell-resolution tasks once the cell-level score "
-            "file is supplied. Do not derive from method_scores — domain-level and "
-            "cell-level scores are negatively correlated for several methods."
-        )
-    }
+    # ── cell_level_scores ──────────────────────────────────────────────────────
+    # Parsed from task_{N}.csv's sc_metrics_* rows when those files are present in raw_dir;
+    # only single-cell-resolution tasks carry them, so this is naturally a subset of all tasks.
+    # Falls back to the scaffold-only placeholder if the files haven't been supplied yet.
+    cell_level_scores = _parse_cell_level_scores(raw_dir)
+    if not cell_level_scores:
+        cell_level_scores = {
+            "_comment": (
+                "Populated only for single-cell-resolution tasks once the cell-level score "
+                "file is supplied. Do not derive from method_scores — domain-level and "
+                "cell-level scores are negatively correlated for several methods."
+            )
+        }
 
     decision_tree_ref = {"_ref": "See decision_tree.DECISION_TREE in decision_tree.py"}
     method_metadata = {k: dict(v) for k, v in METHOD_METADATA.items()}
@@ -351,6 +451,11 @@ def main() -> None:
     cp_tasks = [tid for tid, t in kb["task_knowledge"].items() if t.get("batch_type")]
     print(f"  tasks w/ batch info: {len(cp_tasks)} ({', '.join(sorted(cp_tasks))})")
     print(f"  method summaries : {len(kb['method_summaries'])} methods pre-summarised")
+    cell_tasks = [k for k in kb["cell_level_scores"] if not k.startswith("_")]
+    if cell_tasks:
+        print(f"  cell-level tasks : {len(cell_tasks)} ({', '.join(sorted(cell_tasks, key=lambda t: int(t.split('_')[1])))})")
+    else:
+        print("  cell-level tasks : 0 (scaffold only — no task_{N}.csv files with sc_metrics_ rows found in raw_dir)")
 
 
 if __name__ == "__main__":

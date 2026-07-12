@@ -20,7 +20,16 @@ Raw benchmark numbers (composite_score, overall/BPC/BER/SPC/DTP, similarity, etc
 the LLM as grounding evidence, but are deliberately NOT surfaced in the text shown back to the
 USER — the model reasons over them internally and writes a plain-language blurb (what the method
 is, why it fits) instead of quoting scores. _format_answer() controls the final shape: one
-scenario-summary sentence, up to 3 numbered method blurbs, one closing summary sentence.
+scenario-summary sentence, up to 3 numbered method blurbs, one closing summary sentence — and
+nothing else. In particular there is no slot for explaining internal methodology (e.g. "this is
+a static branch answer, not a computed ranking") — confidence_note/matched_branch/
+decision_tree_crossref are sent to the LLM only as background context to weigh, never as
+something to repeat back to the user; the prompt explicitly says so.
+
+user_profile.priority is None whenever the user never stated a speed/memory/accuracy tradeoff —
+the prompt is instructed not to claim one was requested when it's null. user_profile.user_goal
+carries the user's own stated objective (set by Call 1) so scenario_summary can reflect what they
+actually said instead of being inferred solely from enum fields.
 """
 from __future__ import annotations
 
@@ -134,7 +143,6 @@ class ResolvedSelection(NamedTuple):
     selected: list[dict]
     scenario_summary: str | None
     summary: str | None
-    branch_note: str | None
     is_fully_llm_selected: bool
 
 
@@ -148,14 +156,12 @@ def _resolve_selection(raw_text: str, candidates: list[dict], k: int = 3) -> Res
     target = min(k, len(candidates))
     scenario_summary = None
     summary = None
-    branch_note = None
     validated: list[dict] = []
     try:
         parsed = json.loads(_strip_fences(raw_text))
         validated = _validate_selection(parsed.get("selected"), candidates)
         scenario_summary = parsed.get("scenario_summary")
         summary = parsed.get("summary")
-        branch_note = parsed.get("branch_note")
     except (json.JSONDecodeError, AttributeError, TypeError):
         pass
 
@@ -169,7 +175,7 @@ def _resolve_selection(raw_text: str, candidates: list[dict], k: int = 3) -> Res
                 break
             validated.append({**c, "sentence": None})
 
-    return ResolvedSelection(validated, scenario_summary, summary, branch_note, is_fully_llm_selected)
+    return ResolvedSelection(validated, scenario_summary, summary, is_fully_llm_selected)
 
 
 def _fallback_sentence(entry: dict) -> str:
@@ -198,9 +204,6 @@ def _format_answer(resolved: ResolvedSelection) -> str:
     if resolved.summary:
         lines.append("")
         lines.append(str(resolved.summary))
-    if resolved.branch_note:
-        lines.append("")
-        lines.append(str(resolved.branch_note))
     return "\n".join(lines)
 
 

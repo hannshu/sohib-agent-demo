@@ -238,7 +238,10 @@ def rank_methods_domain_level(
             task_ids = task_id if isinstance(task_id, list) else [task_id]
             for tid in task_ids:
                 if tid and tid in method_scores:
-                    s = _method_score(method, method_scores[tid], profile.priority)
+                    # profile.priority is None when the user never stated one — default to
+                    # "balanced" for the actual weighting, but this default is never written
+                    # back into the profile, so it never reaches the LLM as if the user asked.
+                    s = _method_score(method, method_scores[tid], profile.priority or "balanced")
                     if s > float("-inf"):
                         method_agg[method].append(s * ds["similarity"])
 
@@ -280,6 +283,38 @@ def rank_methods_domain_level(
     return ranked[:top_k], []
 
 
+def cell_level_data_available(cell_level_scores: dict) -> bool:
+    """
+    True once the cell-level score file has real per-task data (not just the placeholder
+    _comment key). While this is False, rank_methods_cell_level() always returns the fixed
+    published branch answer (Scanorama, Harmony, BANKSY) regardless of any profile field —
+    so callers deciding whether to ask the user for cell-level-irrelevant details (num_locations,
+    batch_effect_severity, etc.) should check this first: asking is pointless (and misleading —
+    it implies those answers would change the outcome, when nothing currently does) while it's False.
+    """
+    return any(
+        k != "_comment" and isinstance(v, dict)
+        for k, v in cell_level_scores.items()
+    )
+
+
+def _static_cell_level_branch() -> tuple[list[dict], list[dict]]:
+    """The SOHIB decision-tree's published cell-level answer — used both when no cell-level
+    data exists at all, and as a fallback when this profile's matched tasks happen to be among
+    the ~17 tasks that don't carry single-cell ground truth (even if other tasks in the KB do)."""
+    return (
+        [
+            {"method": "Scanorama", "composite_score": None,
+             "evidence": {"source": "SOHIB decision-tree branch (static)", "task_id": None}},
+            {"method": "Harmony",   "composite_score": None,
+             "evidence": {"source": "SOHIB decision-tree branch (static)", "task_id": None}},
+            {"method": "BANKSY",    "composite_score": None,
+             "evidence": {"source": "SOHIB decision-tree branch (static)", "task_id": None}},
+        ],
+        [],
+    )
+
+
 def rank_methods_cell_level(
     profile: UserProfile,
     matched_datasets: list[dict],
@@ -287,26 +322,12 @@ def rank_methods_cell_level(
 ) -> tuple[list[dict], list[dict]]:
     """
     Cell-level ranking. Reads ONLY from cell_level_scores, never from method_scores.
-    Until the cell-level score file is supplied, returns the static decision-tree
-    branch (Scanorama, Harmony, BANKSY) with a confidence note.
+    Falls back to the static decision-tree branch (Scanorama, Harmony, BANKSY) both when no
+    cell-level data exists at all, AND when this profile's matched tasks aren't among the tasks
+    that carry it (only single-cell-resolution tasks do — see cell_level_data_available).
     """
-    has_data = any(
-        k != "_comment" and isinstance(v, dict)
-        for k, v in cell_level_scores.items()
-    )
-
-    if not has_data:
-        return (
-            [
-                {"method": "Scanorama", "composite_score": None,
-                 "evidence": {"source": "SOHIB decision-tree branch (static)", "task_id": None}},
-                {"method": "Harmony",   "composite_score": None,
-                 "evidence": {"source": "SOHIB decision-tree branch (static)", "task_id": None}},
-                {"method": "BANKSY",    "composite_score": None,
-                 "evidence": {"source": "SOHIB decision-tree branch (static)", "task_id": None}},
-            ],
-            [],
-        )
+    if not cell_level_data_available(cell_level_scores):
+        return _static_cell_level_branch()
 
     all_methods: set[str] = set()
     for ds in matched_datasets:
@@ -335,12 +356,40 @@ def rank_methods_cell_level(
         meta = METHOD_METADATA.get(m, {})
         if is_architecturally_excluded(m, profile, meta):
             continue
+
+        # Evidence from the best-matched dataset's task, mirroring the domain-level style
+        # (task_id/dataset/similarity + the real sub-metrics) rather than leaving it empty.
+        evidence = {}
+        best_ds = matched_datasets[0] if matched_datasets else None
+        if best_ds is not None:
+            task_id = best_ds["profile"].get("task_id")
+            task_ids = task_id if isinstance(task_id, list) else [task_id]
+            for tid in task_ids:
+                if tid and tid in cell_level_scores and m in cell_level_scores[tid]:
+                    evidence = {
+                        "task_id": tid,
+                        "dataset": best_ds["slice_id"],
+                        "similarity": round(best_ds["similarity"], 3),
+                        **{k: v for k, v in cell_level_scores[tid][m].items()
+                           if k in ("overall_cell_level", "classification_acc", "classification_f1",
+                                    "cLISI", "isolated_labels", "ASW_label", "best_classifier",
+                                    "completion_status")},
+                    }
+                    break
+
         ranked.append({
             "method": m,
             "composite_score": round(sum(s) / len(s), 4),
-            "evidence": {},
+            "evidence": evidence,
             "warnings": _build_warnings(m, profile, meta),
         })
+
+    if not ranked:
+        # Real cell-level data exists in the KB, but none of THIS profile's matched tasks carry
+        # it (e.g. the closest matches are Visium cortex tasks, which have no single-cell ground
+        # truth) — fall back to the static branch rather than returning an empty pool.
+        return _static_cell_level_branch()
+
     ranked.sort(key=lambda x: x["composite_score"], reverse=True)
     return ranked[:10], []
 

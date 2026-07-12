@@ -29,7 +29,17 @@ class UserProfile(BaseModel):
     sparsity: Optional[float] = None
     batch_effect_severity: Optional[Literal["minimal", "moderate", "maximal"]] = None
 
-    priority: Literal["accuracy", "speed", "memory", "balanced"] = "balanced"
+    # A short paraphrase of what the user is actually trying to achieve, beyond what the
+    # structured fields capture (e.g. "preserve rare cell-type identity after integration").
+    # Not used by matching.py's scoring — it exists purely so Call 2 can ground its narration
+    # in the user's own stated goal instead of inferring one from field values alone.
+    user_goal: Optional[str] = None
+
+    # None means "not stated" — must stay Optional (no default like "balanced") so the LLM in
+    # Call 2 can tell "the user asked for X" from "this field was never set." A concrete default
+    # here previously caused the model to write as if the user had actively requested a
+    # balanced accuracy/speed/memory tradeoff when they'd never mentioned priority at all.
+    priority: Optional[Literal["accuracy", "speed", "memory", "balanced"]] = None
     avoid_deep_learning: bool = False
     source: Literal["text", "h5ad", "text+h5ad"] = "text"
 
@@ -57,10 +67,6 @@ class UserProfile(BaseModel):
             if getattr(self, field) is None:
                 missing.append(description)
         return missing
-
-    def is_fully_specified(self) -> bool:
-        """True when there is nothing left worth asking for before recommending."""
-        return self.is_ready_for_recommendation() and not self.missing_optional_fields()
 
 
 class RecommendationResult(BaseModel):
