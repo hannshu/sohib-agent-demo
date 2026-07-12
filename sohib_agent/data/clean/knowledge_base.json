@@ -17683,6 +17683,5 @@
         "epigenomics"
       ]
     }
-  },
-  "_reconciliation_note": "overall_ranks.csv contains 42 methods; manuscript evaluates 40. Extra methods vs. manuscript: ['DECIPHER (cell)', 'FuseMap (cell)', 'Nicheformer']. These are kept in method_scores but flagged here."
+  }
 }

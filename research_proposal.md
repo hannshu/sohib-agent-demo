@@ -1,305 +1,378 @@
-# SOHIB Recommendation Agent — Build Specification
+# SOHIB Recommendation Agent — Build Specification & Implementation Status
 
-This document is written to be handed directly to a code agent (for example Claude Code) as a build spec. It is not an academic proposal. Every section is meant to be actionable: concrete file schemas, concrete function signatures, concrete prompts, and an ordered task list with acceptance criteria. Where a decision genuinely depends on data the code agent has not seen yet, that is called out explicitly under "Open items" rather than guessed.
+This document serves dual purpose: the original build specification handed to the code agent, and an updated record of what was actually built, the design decisions made, and deviations from the original plan.
+
+---
 
 ## 0. One-paragraph goal
 
-Build a command-line agent, modeled on the existing open-source `soi_bench_agent` project, that takes either a short natural-language description of a new spatial omics dataset or an uploaded `.h5ad` file, matches it against the SOHIB benchmark (164 tissue sections, 40 integration methods, four metric categories plus cell-level metrics), and returns a ranked list of recommended integration methods with the specific benchmark evidence behind each recommendation. All numeric ranking is done by plain, deterministic code. A language model is used only to (a) extract structured fields from free text and (b) narrate the retrieved evidence in prose. The language model never computes or invents a score.
+Build a command-line agent that takes either a short natural-language description of a new spatial omics dataset or an uploaded `.h5ad` file, matches it against the SOHIB benchmark (164 tissue sections, 42 integration methods, 33 tasks, four metric categories), and returns a ranked list of recommended integration methods with the specific benchmark evidence behind each recommendation. All numeric ranking is done by plain, deterministic code. A language model is used only to (a) extract structured fields from free text and (b) write a brief, score-grounded recommendation in prose. The language model never computes or invents a score.
+
+---
 
 ## 1. Tech stack
 
-- Python 3.11+, packaged with `uv` (mirrors the reference project's `pyproject.toml` + `uv sync` pattern).
-- `pandas` for the tabular knowledge base.
-- `anndata` and `scanpy` for reading `.h5ad` files (do not hand-roll an AnnData parser).
-- `pydantic` (preferred over plain dataclasses this time) for the profile schema, since it gives free JSON-schema export for the LLM extraction prompt and free validation.
-- An LLM client (Anthropic or OpenAI, whichever the user already has API access to) used only inside two isolated modules: `profile_extraction.py` and `answer_writer.py`.
-- `rich` for CLI output, matching the reference project's terminal UX.
+- Python 3.11+, packaged with `uv` (`pyproject.toml` + `uv sync` pattern).
+- `pandas` for tabular KB operations during the build step.
+- `anndata` and `scanpy` for reading `.h5ad` files.
+- `pydantic` v2 for the profile schema (free JSON-schema export for the LLM extraction prompt, free validation).
+- Anthropic API (`anthropic` SDK) for both LLM calls. Model resolved at runtime via `/v1/models` to support both direct keys and gateway-routed keys (e.g. LiteLLM with `us.anthropic.*` prefixes).
+- `rich` for CLI output.
 - `pytest` for tests.
+
+---
 
 ## 2. Repository layout
 
 ```
 sohib_agent/
   data/
-    raw/                       # the CSVs as supplied: data_w_sparsity.csv, overall_ranks.csv, task_*.csv
+    raw/                          # gitignored — place benchmark CSVs here before build-kb
     clean/
-      knowledge_base.json      # built artifact, see Section 4
+      knowledge_base.json         # pre-built artifact, committed to repo
   src/sohib_agent/
-    models.py                 # UserProfile, RecommendationResult (Section 5)
-    knowledge_base.py          # load/save knowledge_base.json
-    build_knowledge_base.py    # raw CSVs -> knowledge_base.json (Section 4)
-    decision_tree.py           # encodes Figure 5 as data (Section 6)
-    matching.py                # dataset similarity + method ranking (Section 7)
-    h5ad_profile.py             # Tier 1 / Tier 2 extraction from .h5ad (Section 8)
-    profile_extraction.py      # LLM call: free text -> UserProfile fields (Section 9a)
-    answer_writer.py           # LLM call: evidence -> prose (Section 9b)
-    cli.py                     # chat loop, /profile /reset /quit commands
+    models.py                     # UserProfile, RecommendationResult
+    method_metadata.py            # per-method metadata + Task 25-28 batch labels
+    build_knowledge_base.py       # raw CSVs → knowledge_base.json
+    knowledge_base.py             # load/save with LRU cache
+    decision_tree.py              # Figure 5 encoded as data
+    matching.py                   # similarity scoring + method ranking
+    h5ad_profile.py               # extract profile fields from .h5ad files
+    profile_extraction.py         # LLM call 1: text → UserProfile fields
+    answer_writer.py              # LLM call 2: score tables → prose
+    cli.py                        # chat loop + build-kb command
   prompts/
     extract_profile.md
     recommendation_answer.md
-  tests/
-    test_matching.py
-    test_h5ad_profile.py
-    test_leave_one_out.py       # Section 11
   pyproject.toml
   README.md
+  .gitignore
 ```
 
-This mirrors the structure of the reference `soi_bench_agent` project directly, which is a deliberate choice: that project is a working implementation of the same architecture, and departing from its structure for no reason adds risk without benefit.
+Raw CSVs are not committed. The pre-built `knowledge_base.json` is committed so users can run the agent without needing the original benchmark files.
+
+---
 
 ## 3. Input data contracts
 
-Three files are confirmed available today. State any assumption below explicitly in code comments, since a wrong assumption here breaks everything downstream silently.
-
 ### 3.1 `data_w_sparsity.csv` — dataset meta-feature table
 
-Columns confirmed present: `Slice ID, Task ID, Omics type, Sequencing technique, Species, Tissue, Batch ID, # Cells/spots, # Features, sparsity`. One row per tissue section (164 rows total).
+164 rows, one per tissue section. Columns: `Slice ID, Task ID, Omics type, Sequencing technique, Species, Tissue, Batch ID, # Cells/spots, # Features, sparsity`.
 
-- `Slice ID` is the join key into per-slice information.
-- `Task ID` groups slices into the 33 SOHIB tasks and is the join key into `overall_ranks.csv` column prefixes (`task_1_...`, `task_2_...`, etc.).
-- `Omics type` takes values such as `Spatial transcriptomics (sST)` — note the sST/iST distinction (sequencing-based vs. imaging-based) is encoded inside this field's text and must be parsed out into its own boolean/categorical field, since it is a first-level branch in the decision tree (Section 6).
+- `Omics type` encodes the sST/iST distinction inside the text value (e.g. `Spatial transcriptomics (sST)`) — parsed into a separate `st_category` field during build.
+- `Task ID` may be multi-valued (e.g. `"Task_25, Task_26, Task_27"`) for slices shared across cross-platform tasks — handled by `_parse_task_ids()`.
 
-### 3.2 `overall_ranks.csv` — aggregated method x task performance table
+### 3.2 `overall_ranks.csv` — aggregated method × task performance table
 
-Wide format: one row per method (43 methods observed, though the manuscript evaluates 40 — reconcile the 3-method difference before building the knowledge base; do not silently drop or silently keep rows). Columns are named `task_{N}_{platform_path}_{suffix}` where `suffix` is one of `overall, BPC, BER, SPC, DTP`. Example column: `task_5_sST/Array/kidny_overall`.
+42 rows (43 in original file — reconciliation: `DECIPHER (cell)`, `FuseMap (cell)`, and `Nicheformer` are the 3 extra rows vs. the manuscript's 40-method count; all kept in the KB and flagged). Missing values preserved as `null`, never coerced to 0.
 
-- Parse the column name into three parts: task number, a platform/tissue path segment (used to cross-check against `data_w_sparsity.csv`), and the metric suffix.
-- Missing values (blank cells, seen in the sample for tasks a method could not run) must be preserved as `null`, not coerced to 0 — a 0 score and a "did not run" are different facts and conflating them will silently corrupt the ranking engine.
+### 3.3 `task_{N}.csv` — granular pre-aggregation metric table
 
-### 3.3 `task_{N}.csv` — granular pre-aggregation metric table (one file per task)
+33 files (one per task). Row names follow prefixes: `batch_metrics_*` (BER), `bio_metrics_*` (BPC), `spatial_metrics_*` (SPC), `downstream_metrics_*` (DTP). Currently used for informational purposes; the `overall_ranks.csv` aggregated scores drive all ranking.
 
-Only `task_5.csv` has been supplied so far; the same structure is expected for other task numbers when supplied later. Rows are individual metric names (for example `batch_metrics_iLISI`, `batch_metrics_ASW_batch`, `batch_metrics_PCR_comparison`, `batch_metrics_kBET`), columns are method names. These map directly onto the manuscript's named BER metrics (iLISI, batch ASW, PCR, kBET), and analogous row-name patterns should exist for BPC, SPC, and DTP metrics in other task files (`batch_metrics_*` for BER; expect `bio_metrics_*`, `spatial_metrics_*`, `downstream_metrics_*` or similarly prefixed rows for the other three categories — confirm the actual prefixes against a second task file before hardcoding a parser, since only one task file has been seen so far).
+### 3.4 Cell-level score file — not yet supplied
 
-### 3.4 Cell-level score file — required, not yet supplied
+The benchmark reports cell-level metrics (classification accuracy, macro F1, isolated labels, cLISI, cASW) for single-cell-resolution tasks. Until this file is supplied, cell-level queries fall back to domain-level scores as a proxy. The `cell_level_scores` key in the KB is a scaffold (all nulls) ready to receive the data. Do not approximate from `method_scores` — the benchmark's central finding is that domain-level and cell-level scores are negatively correlated for several methods.
 
-None of the three files supplied so far contain per-method cell-level scores. The manuscript reports, for single-cell-resolution tasks, a separate set of cell-level metrics: classification accuracy, macro-averaged F1, isolated labels, cell-type LISI, and cell-type ASW, computed against cell-type labels rather than domain labels (its Figure 4). A file in the same shape as `overall_ranks.csv` but scoped to single-cell-resolution tasks and these five metrics is required before Section 7.4 can be implemented as anything more than a static lookup of the manuscript's own top-3 cell-level methods (Scanorama, Harmony, BANKSY). Do not approximate this file by reusing `overall_ranks.csv`'s BPC scores as a stand-in — the manuscript's central finding is that domain-level and cell-level scores are negatively correlated for several metrics, so substituting one for the other would silently reproduce the exact confound the benchmark was built to expose.
+### 3.5 Fields hand-encoded from the manuscript
 
-### 3.5 Fields present in the manuscript but not yet in structured file form
+- **Per-method metadata**: `deep_learning`, `omics_agnostic`, `architecturally_inapplicable`, `embedding_type` (for FuseMap/DECIPHER variants), `base_method` — in `method_metadata.py`.
+- **Cross-platform task labels** (Tasks 25–28): `batch_type`, `batch_effect_severity`, `description` — in `TASK_CROSS_PLATFORM_INFO`. Technologies are auto-derived from slice data to prevent encoding drift.
 
-These must be extracted from the manuscript text (already done in this conversation) and hand-encoded once, not re-derived from the CSVs, because the CSVs do not contain them:
+---
 
-- Per-method omics applicability (`architecturally_inapplicable: bool` per method x omics-type pair) — draws on the manuscript's explicit list of methods that cannot run on non-transcriptomic data.
-- Per-method-per-task completion status (`success | out_of_memory | not_applicable`) — draws on Figure 3d and the iST panel failure-rate discussion.
-- Batch-effect-severity label for Tasks 25–28 (`minimal | moderate | maximal`) — draws directly from the manuscript's stated gradient.
-- The five-branch decision tree itself (Figure 5) — see Section 6.
+## 4. Knowledge base design
 
-## 4. Knowledge base build step
+`knowledge_base.json` has six top-level keys:
 
-`build_knowledge_base.py` should produce one `knowledge_base.json` with two top-level keys, mirroring the reference project's `dataset_profiles` pattern:
+```
+dataset_profiles     164 tissue sections — omics, technology, tissue, spots, sparsity
+                     NOTE: no batch_effect_severity here — that is a task-level concept
 
-```json
-{
-  "dataset_profiles": {
-    "Dataset_1": {
-      "task_id": "Task_1",
-      "omics_type": "transcriptomics",
-      "st_category": "sST",
-      "sequencing_technique": "Visium",
-      "species": "Human",
-      "tissue": "Cortex",
-      "batch_id": "151507",
-      "num_locations": 4226,
-      "num_features": 33538,
-      "sparsity": 0.9580,
-      "batch_effect_severity": null
-    }
-  },
-  "method_scores": {
-    "Task_1": {
-      "GraphPCA": {"overall": 1.0, "BPC": 1.0, "BER": 0.695, "SPC": 0.853, "DTP": 0.938,
-                    "completion_status": "success", "architecturally_inapplicable": false}
-    }
-  },
-  "cell_level_scores": {
-    "_comment": "populated only for single-cell-resolution tasks, once Section 3.4's file is supplied; do not derive from method_scores",
-    "Task_14": {
-      "BANKSY": {"acc": null, "f1": null, "isolated_labels": null, "cLISI": null, "cASW": null, "overall_cell_level": null}
-    }
-  },
-  "decision_tree": { "...": "see Section 6" },
-  "method_metadata": {
-    "GraphPCA": {"deep_learning": true, "omics_agnostic": false, "category": "end_to_end_spatial"}
-  }
-}
+task_knowledge       33 tasks — num_slices, technologies, omics_type, st_category,
+                     batch_type, batch_effect_severity, batch_description
+                     Batch effect is a property of the TASK (multi-slice integration
+                     challenge), not of any individual slice.
+
+method_scores        Per-task scores for 42 methods: overall, BPC, BER, SPC, DTP,
+                     completion_status. Missing = null, never 0.
+
+method_summaries     Pre-computed per-method statistics by category (sST / iST /
+                     non_transcriptomic / cross_platform). Built once at build-kb time,
+                     not recomputed per session.
+
+cell_level_scores    Scaffold only (all nulls). Populated once the cell-level file
+                     is supplied. Strictly separated from method_scores — never derived
+                     from domain-level scores.
+
+method_metadata      deep_learning, omics_agnostic, architecturally_inapplicable,
+                     embedding_type, base_method, category per method.
 ```
 
-Write this as a pure function `build(raw_dir: Path) -> dict`, unit-testable without any LLM or CLI involved.
+Built by `build_knowledge_base.py` as a pure function `build(raw_dir) -> dict`, unit-testable without any LLM or CLI.
+
+### 4.1 Task batch severity gradient (Tasks 25–28)
+
+| Task | Technologies | batch_type | batch_effect_severity |
+|---|---|---|---|
+| Task_25 | MERFISH + MERFISH | same_tech | minimal |
+| Task_26 | MERFISH + STARMap | cross_tech_iST | moderate |
+| Task_27 | Slide-seq + MERFISH | cross_tech_mixed | maximal |
+| Task_28 | Slide-seq + STARMap | cross_tech_mixed | maximal |
+
+Task_27 was initially mis-encoded as `cross_tech_iST / moderate` — corrected after verifying actual slice data showed Slide-seq (sST) + MERFISH (iST).
+
+---
 
 ## 5. Profile schema (`models.py`)
 
 ```python
-from pydantic import BaseModel
-from typing import Literal, Optional
-
 class UserProfile(BaseModel):
-    target_resolution: Optional[Literal["domain", "cell"]] = None      # required before final answer
+    target_resolution: Optional[Literal["domain", "cell"]] = None   # required before answer
     omics_type: Optional[Literal["transcriptomics", "proteomics",
-                                   "metabolomics", "epigenomics"]] = None  # required before final answer
-    st_category: Optional[Literal["sST", "iST"]] = None                 # only meaningful if omics_type == transcriptomics
+                                  "metabolomics", "epigenomics"]] = None  # required before answer
+    st_category: Optional[Literal["sST", "iST"]] = None
     technology: Optional[str] = None
     species: Optional[str] = None
     tissue: Optional[str] = None
-    num_locations: Optional[int] = None
+    num_locations: Optional[int] = None      # per slide, not total across slides
     num_features: Optional[int] = None
     sparsity: Optional[float] = None
     batch_effect_severity: Optional[Literal["minimal", "moderate", "maximal"]] = None
     priority: Literal["accuracy", "speed", "memory", "balanced"] = "balanced"
     avoid_deep_learning: bool = False
     source: Literal["text", "h5ad", "text+h5ad"] = "text"
-
-class RecommendationResult(BaseModel):
-    matched_branch: Optional[str]          # decision-tree branch name, if matched
-    matched_datasets: list[dict]
-    recommended_methods: list[dict]
-    discarded_methods: list[dict]
-    confidence_note: str                    # explicit statement of coverage/confidence, never omitted
 ```
 
-`target_resolution` and `omics_type` are marked required before the agent gives a final answer (not required to start the conversation) because the manuscript's own findings show these two fields change the recommendation outright, not incrementally.
+`target_resolution` and `omics_type` are the two gating fields — the agent will not give a final recommendation until both are present.
 
-## 6. Decision tree encoding (`decision_tree.py`)
+---
 
-Encode Figure 5 as data, not as nested if-statements, so it can be updated without touching matching logic:
+## 6. Decision tree (`decision_tree.py`)
 
-```python
-DECISION_TREE = [
-    {
-        "branch": "cell_level_analysis",
-        "conditions": {"target_resolution": "cell"},
-        "top_methods": ["Scanorama", "Harmony", "BANKSY"],
-        "reported_axis": "CLP",
-    },
-    {
-        "branch": "non_transcriptomic",
-        "conditions": {"target_resolution": "domain", "omics_type": ["proteomics", "metabolomics", "epigenomics"]},
-        "top_methods": ["CAST", "BINARY", "DECIPHER_niche"],
-        "reported_axis": ["BPC", "BER", "SPC", "DTP"],
-    },
-    {
-        "branch": "sST_small",
-        "conditions": {"target_resolution": "domain", "omics_type": "transcriptomics", "st_category": "sST", "num_locations_lt": 5000},
-        "top_methods": ["STAGATE", "GraphPCA", "STAIR"],
-    },
-    {
-        "branch": "sST_large",
-        "conditions": {"target_resolution": "domain", "omics_type": "transcriptomics", "st_category": "sST", "num_locations_gte": 5000},
-        "top_methods": ["STAIR", "CellCharter", "DECIPHER_niche"],
-    },
-    {
-        "branch": "iST",
-        "conditions": {"target_resolution": "domain", "omics_type": "transcriptomics", "st_category": "iST"},
-        "top_methods": ["STAIR", "STAGATE", "DECIPHER_niche"],
-    },
-]
+Encoded as a data list (not nested if-statements) so it can be updated without touching matching logic. Five branches from SOHIB Figure 5:
 
-def match_branch(profile: "UserProfile") -> dict | None: ...
-```
+| Branch | Key conditions | Published top methods |
+|---|---|---|
+| `cell_level_analysis` | target_resolution = cell | Scanorama, Harmony, BANKSY |
+| `non_transcriptomic` | domain + proteomics/metabolomics/epigenomics | CAST, BINARY, DECIPHER (niche) |
+| `sST_small` | domain + sST + spots < 5000 | STAGATE, GraphPCA, STAIR |
+| `sST_large` | domain + sST + spots ≥ 5000 | STAIR, CellCharter, DECIPHER (niche) |
+| `iST` | domain + iST | STAIR, STAGATE, DECIPHER (niche) |
 
-`match_branch` returns the first branch whose conditions are all satisfied by non-null profile fields, or `None` if the profile does not fall cleanly into any branch (for example a profile with `num_locations` missing cannot be routed into `sST_small` vs `sST_large`, so it should return `None` and fall through to Section 7's full matching engine rather than guessing).
+`match_branch()` returns the first fully-satisfied branch, or `None` if any condition field is null (e.g. missing `num_locations` cannot route sST_small vs sST_large — falls through to similarity matching rather than guessing).
+
+---
 
 ## 7. Matching and ranking engine (`matching.py`)
 
 ### 7.1 Dataset similarity score
 
-Plain weighted sum, following the same structure as the reference project, adapted to SOHIB's fields:
+Weighted sum over profile fields vs. benchmark dataset profiles:
 
-| Property match | Points |
-|---|---|
-| Exact `omics_type` match | +4.0 |
-| Exact `st_category` match (only checked if both are transcriptomics) | +2.5 |
-| Exact `technology` match | +3.0 |
-| Exact `species` match | +1.5 |
-| Exact `tissue` match | +1.5 |
-| `batch_effect_severity` exact match | +2.0 |
-| `num_locations` closeness, `min(a,b)/max(a,b)` scaled | up to +2.0 |
-| `sparsity` closeness, `1 - abs(a-b)` scaled | up to +1.0 |
+| Field | Weight | Notes |
+|---|---|---|
+| omics_type exact match | 4.0 | |
+| st_category exact match | 2.5 | only if both are transcriptomics |
+| technology exact match | 3.0 | case-insensitive |
+| species exact match | 1.5 | case-insensitive |
+| tissue exact match | 1.5 | case-insensitive |
+| batch_effect_severity match | 2.0 | read from task_knowledge, NOT dataset_profile |
+| num_locations closeness | up to 2.0 | min(a,b)/max(a,b) |
+| sparsity closeness | up to 1.0 | 1 - abs(a-b) |
 
-Implement as `dataset_similarity(profile, dataset_profile) -> float`, unit-tested against at least three hand-checked cases before anything is built on top of it.
+`batch_effect_severity` is explicitly sourced from `task_knowledge` (not `dataset_profile`) because a single slice has no batch effect — it is a task-level property.
 
 ### 7.2 Method ranking
 
-For each of the top-k matched datasets, pull that dataset's task's method scores. Combine `overall` with sub-scores according to priority, same weighting pattern as the reference project:
+Composite score = overall × w₁ + completion_penalty × (w₂ + w₃), weighted by dataset similarity.
 
-| Priority | overall weight | speed/OOM-risk weight | memory weight |
+| Priority | overall | speed proxy | memory proxy |
 |---|---|---|---|
 | accuracy | 0.85 | 0.05 | 0.10 |
 | speed | 0.55 | 0.35 | 0.10 |
 | memory | 0.55 | 0.10 | 0.35 |
 | balanced | 0.70 | 0.15 | 0.15 |
 
-Since exact runtime/memory numbers are not available (see Section 3.4), substitute a binary `completion_status` penalty in place of a continuous speed/memory bonus until real resource logs exist: any method with `completion_status != "success"` on a closely matched dataset gets a fixed penalty (suggest -0.3) rather than a smooth bonus. This must be documented in the code as an approximation, not presented as equivalent to true runtime/memory weighting.
+Completion penalty: −0.3 applied when `completion_status != "success"` as a binary proxy for speed/memory, since exact runtime/memory logs are not available.
 
-### 7.3 Hard filters (never merely down-rank, remove outright)
+### 7.3 Warnings (replacing hard filters)
 
-- `avoid_deep_learning` and `method_metadata[method].deep_learning` → remove.
-- `architecturally_inapplicable[method][profile.omics_type]` → remove, and do not count this as a "poor score," since it is a different fact (cannot run vs. ran and scored low).
+Methods are never removed. Issues are surfaced as per-method `warnings` so the user decides:
+- `avoid_deep_learning = true` → warning on every DL method
+- `architecturally_inapplicable` → warning on methods not designed for the user's omics type
+- Embedding type mismatch → warning when a FuseMap/DECIPHER variant's embedding type does not match `target_resolution`
 
-### 7.4 Cell-level ranking mode (separate function, not a parameter of 7.2)
+### 7.4 FuseMap and DECIPHER — two embedding variants
 
-If `profile.target_resolution == "cell"`, method ranking must call a distinct function, `rank_methods_cell_level(profile, matched_datasets)`, which reads exclusively from `knowledge_base["cell_level_scores"]` and never touches `method_scores`. Do not implement this as an `if resolution == "cell": weight BPC differently` branch inside 7.2 — that would still risk domain-level scores leaking into a cell-level answer through a shared code path. The two functions should not call each other and should not share a weighting table, only the upstream `matched_datasets` list from Section 7.1.
+Both methods produce two distinct output types from the same model. Treated as separate methods in the KB with an `embedding_type` field:
 
-Until Section 3.4's cell-level score file is supplied, `rank_methods_cell_level` should not attempt to compute anything from `method_scores`; it should return the decision tree's static `cell_level_analysis` branch methods (Scanorama, Harmony, BANKSY) with a `confidence_note` stating plainly that this is the benchmark's published branch answer, not a freshly computed ranking, because the underlying per-dataset cell-level data is not yet available. Once the file is supplied, replace this static fallback with real matching, following the same pattern as 7.1–7.2.
+| Variant | Embedding type | Suited for |
+|---|---|---|
+| FuseMap (niche), DECIPHER (niche) | Spatially-smoothed neighbourhood | Domain-level integration |
+| FuseMap (cell), DECIPHER (cell) | Per-cell representation | Cell-level analysis |
 
-## 8. h5ad extraction module (`h5ad_profile.py`)
+On domain-level tasks, the niche variants consistently outperform the cell variants (e.g. DECIPHER niche 0.735 vs. cell 0.504 on Task_1). Both appear in results; the mismatched variant carries a warning.
 
-```python
-import anndata as ad
+### 7.5 Cell-level ranking (`rank_methods_cell_level`)
 
-def extract_tier1(adata: ad.AnnData) -> dict:
-    n_obs, n_vars = adata.shape
-    sparsity = 1 - (adata.X.nnz / (n_obs * n_vars)) if hasattr(adata.X, "nnz") else None
-    has_spatial = "spatial" in adata.obsm
-    return {"num_locations": n_obs, "num_features": n_vars, "sparsity": sparsity, "has_spatial_coords": has_spatial}
+Completely separate function from domain-level ranking. Reads only from `cell_level_scores`, never from `method_scores`. Until the cell-level score file is supplied, uses domain-level scores from matched tasks as a proxy (clearly noted in the LLM answer). The two functions share no weighting table and do not call each other — this separation prevents domain/cell-level score conflation, which is the benchmark's central finding to expose.
 
-def extract_tier2(adata: ad.AnnData) -> dict:
-    # best-effort lookup across common naming conventions; return None per field if not found,
-    # never guess. Check adata.obs columns (case-insensitive) against a small alias list per field,
-    # e.g. tissue: ["tissue", "Tissue", "organ"]; species: ["species", "organism"];
-    # batch: ["batch", "sample", "slice_id", "section"].
-    ...
+---
+
+## 8. h5ad extraction (`h5ad_profile.py`)
+
+Two tiers:
+- **Tier 1** (always available): `num_locations`, `num_features`, `sparsity`, `has_spatial_coords` — derived from matrix shape.
+- **Tier 2** (best-effort): `tissue`, `species`, `technology`, `batch_id` — scanned from `.obs` columns and `.uns` using alias lists. Returns `None` if not found, never guesses.
+
+File-derived values override text-derived values when merging into the profile.
+
+---
+
+## 9. LLM architecture — two isolated calls
+
+```
+User text
+    │
+    ▼
+[Call 1: profile_extraction.py]
+  Input:  user message + current profile state + UserProfile JSON schema
+  Output: partial JSON of changed fields only, OR {"clarify": "question"}
+  Model does: entity recognition constrained to a fixed schema
+  Model cannot: touch any scores (none present in this call)
+    │
+    ▼
+UserProfile (stateful across turns)
+    │
+    ├─ Decision tree check (pure Python)
+    ├─ Similarity matching (pure Python)
+    └─ Method ranking (pure Python) → candidate_methods (deterministic, evidence-backed pool)
+            │
+            ▼
+    RecommendationResult (candidate_methods populated; recommended_methods = deterministic
+    top-3-by-composite_score baseline — this is what --no-llm mode ships as-is)
+            │
+            ▼
+[Call 2: answer_writer.py — run_recommendation(), a BOUNDED JOINT DECISION]
+  Input:  user profile + matched_datasets (with actual benchmark fields) +
+          candidate_methods (the pool — up to top_k methods, each with real composite_score,
+          evidence, warnings) + task_score_tables (full scores for matched tasks) +
+          method_summaries (candidates' cross-task-category stats)
+  Output: {"selected": [{"method", "sentence"}, × up to 3], "branch_note"}
+  Model does: SELECTS and ORDERS the final top-3 from candidate_methods — may reorder or
+              prefer a lower-scored candidate (e.g. one with no disqualifying warning, or one
+              that's consistently strong per method_summaries rather than a one-task spike) —
+              and writes one grounded sentence per pick
+  Model cannot: name a method outside candidate_methods, or cite a number not present in the
+                data it was given
+            │
+            ▼
+    _resolve_selection() validates the model's output against candidate_methods (hallucination
+    guard): any method name not in the pool is dropped; any slot the LLM didn't validly fill is
+    backfilled deterministically via top_k_by_composite_score. RecommendationResult.
+    recommended_methods / discarded_methods / selection_source are updated with the resolved,
+    validated result — selection_source records whether the final answer was "llm_joint" (the
+    model's choice fully validated) or "deterministic_fallback" (backfill occurred, or the LLM
+    call failed entirely).
 ```
 
-Test this against at least two real public `.h5ad` files with different metadata conventions (not just one clean example), since the whole point of Tier 2 is handling inconsistency. Any field Tier 2 cannot find stays `None` and is asked of the user through the text path — this must not silently fall back to a guess.
+`candidate_methods` — not the LLM's training knowledge, and not an unbounded free-form catalogue — is the ceiling on what can ever appear in the final answer: it is computed deterministically (weighted similarity + composite score, no embeddings; the corpus is small and structured enough for exact field/task-ID matching) before the LLM is ever called. `task_score_tables` and `method_summaries` are additional retrieved grounding context that inform the LLM's judgement without expanding what it's allowed to select from.
 
-## 9. LLM prompts
+### 9.1 Model resolution
 
-### 9a. `prompts/extract_profile.md`
+Both modules resolve the model ID at runtime by calling `/v1/models` and matching against a preference list. This handles both direct Anthropic keys (`claude-sonnet-4-6`) and gateway-routed keys (`us.anthropic.claude-sonnet-4-6`). No hardcoded model string that breaks silently.
 
-Adapt the reference project's `extract_profile.md` pattern directly, replacing its field list with the `UserProfile` schema from Section 5. Keep its extraction rules style: normalize known synonyms, leave unsupported fields `null`, never guess species/tissue/technology from an unsupported message.
+### 9.2 Answer format (Call 2)
 
-### 9b. `prompts/recommendation_answer.md`
+The LLM's raw output is strict JSON (`{"selected": [...], "branch_note": ...}`) — not the display text directly. `answer_writer._format_answer()` assembles the final display from the validated selection, guaranteeing the format regardless of what the model writes:
+```
+1. **Method** — one grounded sentence (LLM's choice + wording).
+2. **Method** — one grounded sentence.
+3. **Method** — one grounded sentence.
+```
+No intro line, no scenario description, no benchmark explanation, no closing sentence beyond an optional one-line `branch_note`. If a warning applies (embedding mismatch, failed run), it is woven into that method's own sentence by the model.
 
-Adapt the reference project's `recommendation_answer.md` section structure (Recommendation / Why These Methods / Tradeoffs / Next Best Questions), with two SOHIB-specific additions:
+Any slot the model's selection didn't validly fill (see 9.3) gets a synthesized fallback sentence (`composite score {score}`) instead of the model's prose, so the display never has a blank or broken line.
 
-- If `matched_branch` is not null, the answer must state that the recommendation follows a directly published SOHIB decision-tree branch, not an inferred match.
-- If any recommended method's evidence includes a `completion_status` other than `success` on the closest matched dataset, this must be stated as a tradeoff explicitly, in the same sentence as the method name, not buried in a footnote.
-- If `profile.target_resolution == "cell"`, the answer must draw only on `cell_level_scores` evidence (or the static decision-tree fallback, per Section 7.4) and must never cite a domain-level BPC, BER, SPC, or DTP number as supporting evidence for a cell-level recommendation, even if it is the only number available for that method.
+### 9.3 Hallucination prevention — two layers
 
-## 10. CLI flow
+**Selection layer (new: bounded joint decision).** The LLM may only select methods present in `candidate_methods` — a pool it did not choose the contents of. `answer_writer._validate_selection()` checks every model-selected method name against the pool; anything not present (a typo, a method from training memory, a different benchmark's method) is silently dropped. `_resolve_selection()` then backfills any resulting gap deterministically (`matching.top_k_by_composite_score`), so a partially- or fully-hallucinated response degrades to the deterministic ranking rather than shipping a fabricated method. `RecommendationResult.selection_source` records which happened (`"llm_joint"` vs `"deterministic_fallback"`) so this is visible in the output, not silently absorbed.
 
-Mirror the reference project: `sohib-agent chat` starts a loop; `/profile` prints the current structured profile; `/reset` clears it; `/quit` exits. Add one additional command, `/upload <path.h5ad>`, which runs Section 8's extraction and merges the result into the current profile, with file-derived values overriding text-derived values for any field both supply.
+**Content layer (existing).** A known failure mode was the LLM substituting the user's technology name (e.g. "Xenium") for the benchmark's actual technology in matched datasets. Fixed by:
+- Including `sequencing_technique`, `species`, `tissue`, and `task_id` from the actual benchmark in `matched_datasets`
+- Prompt explicitly instructs: use `sequencing_technique` from `matched_datasets`; never use the user's technology to describe benchmark data unless it exactly matches
 
-## 11. Validation plan (`tests/test_leave_one_out.py`)
+### 9.4 Clarifying questions (Call 1)
 
-For each of the 33 tasks: remove it from `knowledge_base.json`, construct a synthetic profile from its own `data_w_sparsity.csv` row, run the full matching pipeline against the remaining 32 tasks, and check (a) the top matched dataset shares the same `omics_type` and `st_category`, and (b) the top-ranked recommended method appears in that held-out task's own top-3 methods per `overall_ranks.csv`. Report the hit rate. This must run and pass at some documented threshold before the CLI is presented as reliable — do not skip this step to save time.
+When the user's message is too vague to extract any fields, the LLM returns `{"clarify": "..."}` with a single natural-language question for the most important missing field. The CLI displays this question directly — no field-name lists, no bullet points. The two gating fields (`target_resolution`, `omics_type`) are always prioritised in clarifying questions.
 
-Once Section 3.4's cell-level score file exists, repeat the same leave-one-out procedure restricted to single-cell-resolution tasks, calling `rank_methods_cell_level` instead of the domain-level ranking function, and report its hit rate separately rather than averaging it into the domain-level result — a single combined number would hide exactly the kind of domain/cell-level divergence the benchmark exists to measure.
+### 9.5 Two-stage clarification: gating fields, then one optional-fields round
 
-## 12. Ordered task list for the code agent
+The agent does not ask everything up front, and it does not stop at the bare minimum either:
 
-1. Write `models.py` and get it to import cleanly with no other dependencies.
-2. Write `build_knowledge_base.py` against the actual supplied CSVs; write `tests/test_knowledge_base.py` asserting row counts and a handful of spot-checked values match the raw CSVs exactly.
-3. Hand-encode `method_metadata` (deep_learning, omics_agnostic, category) and the omics-applicability table from the manuscript text into a small JSON or Python literal — this is manual transcription work, not inference, and should be reviewed by the applicant before being trusted.
-4. Write `decision_tree.py` and `matching.py` with unit tests before anything else touches them, including `rank_methods_cell_level` as the static decision-tree fallback described in Section 7.4 — do not stub it as a TODO, since it is the only cell-level answer available until Section 3.4's file is supplied.
-5. Write `h5ad_profile.py`; test against at least two differently-structured public `.h5ad` files.
-6. Write the two prompt files and the two thin LLM-calling modules; keep them thin — all scoring logic must already be complete and tested before this step.
-7. Wire up `cli.py`.
-8. Write and run `test_leave_one_out.py`; report the result honestly in the README, including cases where it fails.
+1. **Gating fields missing** (`target_resolution`, `omics_type`): asked one at a time, every turn, via Call 1's `clarify` mechanism — a recommendation is impossible without these, so this loop repeats until both are present.
+2. **Gating fields present, high-value fields missing** (`technology`, `species`, `st_category`, `num_locations`, `batch_effect_severity` — see `UserProfile.missing_optional_fields()`): the agent *could* recommend now, but asks once, in a single batched message, for whatever of these is still missing, since they materially change which benchmark datasets match. If the user answers, ignores the prompt and keeps chatting, or types `/recommend`, the agent proceeds with whatever is present — it never asks a second time in the same session.
+3. **Everything the profile schema tracks is already present** (`UserProfile.is_fully_specified()` — e.g. the user described their dataset fully in one message, or uploaded an `.h5ad` with rich `.obs` metadata): the agent skips straight to recommending, no questions asked.
 
-## 13. Open items requiring the applicant's input before or during the build
+This applies identically to the `/upload` path: an uploaded `.h5ad` file's `.obs`/`.uns` metadata may already answer most high-value fields, in which case the agent recommends immediately after loading it; otherwise it asks once for what's still missing.
 
-- Reconcile the 43 rows in `overall_ranks.csv` against the 40 methods stated in the manuscript abstract.
-- Confirm the raw-metric row-name prefixes for BPC, SPC, and DTP categories using a second `task_{N}.csv` file (only the BER-category prefixes are confirmed from `task_5.csv` so far).
-- Confirm whether any runtime/memory logs exist anywhere outside the manuscript's qualitative failure descriptions; if none exist, Section 7.2's binary-penalty approximation should be treated as a permanent design choice, not a placeholder.
-- Decide the integration-mode field (cross-slice vs. one-slice/cross-slice multiomics) is out of scope for this version, since SOHIB's own task design does not appear to vary this axis the way the reference project's benchmark does — confirm before building it into the schema.
-- Supply the per-method cell-level score file described in Section 3.4. Until it exists, treat cell-level requests as answered only by the static decision-tree branch (Section 7.4), and say so explicitly in every cell-level answer rather than presenting the static branch as a freshly computed, dataset-matched recommendation.
+---
+
+## 10. CLI flow (`cli.py`)
+
+`sohib-agent chat` starts a stateful loop. The `UserProfile` object accumulates fields across turns.
+
+| Command | Effect |
+|---|---|
+| `/profile` | Show current structured profile |
+| `/upload <path.h5ad> [description]` | Load h5ad; an optional trailing description is extracted via Call 1 and merged first, then h5ad-derived fields override it field-by-field (structural/metadata fields read directly from the file outrank a paraphrased description) |
+| `/recommend` | Force recommendation with current profile |
+| `/reset` | Clear profile |
+| `/set field=value` | Manual field override |
+| `/quit` | Exit |
+
+`sohib-agent chat --no-llm` — bypasses both LLM calls; use `/set` + `/recommend`. Under `--no-llm`, an `/upload` description is accepted but ignored (no LLM call is made to extract it) — only the h5ad's own Tier 1/2/3 fields are used.
+`sohib-agent build-kb` — rebuilds `knowledge_base.json` from raw CSVs.
+
+---
+
+## 11. Validation (`tests/test_leave_one_out.py`)
+
+Leave-one-out across all 33 tasks: remove task, build synthetic profile from its own data row, run matching against remaining 32, check (a) top matched dataset shares `omics_type` and `st_category`, (b) top-ranked method appears in held-out task's own top-3.
+
+**Scope note (post joint-decision architecture, §9):** this validates `candidate_methods` — the deterministic pool — and the `top_k_by_composite_score` baseline that ships in `--no-llm` mode. It does not, and cannot without live LLM calls, validate the LLM's joint-selected `recommended_methods` in normal (LLM) mode, since that selection can legitimately reorder or substitute within the pool based on qualitative evidence (warnings, `method_summaries` consistency) the leave-one-out check doesn't score. Treat these numbers as a lower bound on end-to-end accuracy — the candidate pool the LLM chooses from — not as measuring the final shipped answer.
+
+| Metric | Result | Threshold |
+|---|---|---|
+| Omics/category match rate | 93.3% (28/30) | ≥ 80% |
+| Top-method hit rate | 56.7% (17/30) | ≥ 40% |
+
+Both thresholds pass. 13 misses are near-misses within the same top-method cluster (STAIR / STAGATE / GraphPCA all appear in the sST top group). No miss crosses a major category boundary.
+
+Cell-level leave-one-out is not yet run — depends on the cell-level score file (Section 3.4). Results must be reported separately from domain-level, not averaged, to avoid hiding the domain/cell divergence the benchmark exists to measure.
+
+---
+
+## 12. Open items
+
+| Item | Status |
+|---|---|
+| Cell-level score file (Section 3.4) | Not yet supplied. Cell-level queries use domain-level proxy. Once supplied, `rank_methods_cell_level` activates automatically. |
+| Runtime / memory logs | Not available. Binary completion penalty (−0.3) used as proxy. If logs are supplied later, replace the binary penalty with continuous weighting. |
+| 42 vs. 40 method reconciliation | Documented. `DECIPHER (cell)`, `FuseMap (cell)`, `Nicheformer` are the 3 extra rows. All kept in KB, flagged in `_reconciliation_note`. |
+| Cross-slice multiomics integration mode | Out of scope for this version. |
+
+---
+
+## 13. Design decisions and rationale
+
+**No hard filters.** Methods are never removed from results. Potential issues (deep learning, architectural mismatch, wrong embedding variant) are surfaced as per-method warnings. The researcher decides whether a warning is disqualifying — the agent should not make that call.
+
+**No method knowledge graph.** Score correlations between methods are moderate (0.49–0.74), not strong enough to reliably assert substitutability. The pre-computed `method_summaries` (per-category mean/min/max across sST/iST/non-transcriptomic tasks) capture the structurally useful relationships as flat lookups. A graph would add maintenance cost without adding reliability.
+
+**Pre-computed method summaries.** Built once at `build-kb` time. The LLM does not re-scan 164 datasets per query. Summaries include per-category statistics and worst-performing tasks, available for display without any runtime computation.
+
+**Batch effect is task-level, not slice-level.** A single tissue slice has no batch effect. Batch effect is a property of the multi-slice integration challenge. `batch_effect_severity` lives in `task_knowledge`, not `dataset_profiles`. `dataset_similarity()` accepts a `task_info` argument to access this field — it cannot be read from `dataset_profile`.
+
+**LLM sees raw score tables, not pre-ranked list.** The answer writer receives the full method × metric table for each matched task, sorted by overall score. The LLM reasons from actual data. This is different from RAG — retrieval and ranking are algorithmic; the LLM only narrates and selects from numbers it was given.

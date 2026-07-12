@@ -1,7 +1,20 @@
 """
-LLM call: RecommendationResult + raw task score tables -> brief prose answer.
-The LLM receives the full score tables for matched tasks so it can reason
-analytically over the actual data, not just narrate a pre-ranked list.
+LLM call: bounded joint method selection + narration, grounded in retrieved benchmark evidence.
+
+matching.py computes a deterministic, evidence-backed CANDIDATE POOL (RecommendationResult.
+candidate_methods — up to top_k methods, each with a real composite_score, evidence dict, and
+warnings). It does NOT decide the final answer. This module asks the LLM to select and order the
+final top-3 from that pool: a "bounded joint decision" where the LLM can weigh things the flat
+composite score can't capture (warnings, cross-task-category consistency via method_summaries,
+how well a method fits what the user said matters to them) and is free to reorder or pick a
+lower-scored candidate over a higher-scored one — but it can never introduce a method or a
+number that isn't already in the pool it was given.
+
+The LLM's JSON response is validated against candidate_methods before use (_validate_selection):
+any selected method not present in the pool is dropped. If validation leaves fewer than 3 (or
+the whole call fails), missing slots are backfilled deterministically via
+matching.top_k_by_composite_score, so a malformed or hallucinated response degrades gracefully
+to the deterministic ranking instead of shipping a fabricated method.
 """
 from __future__ import annotations
 
@@ -9,6 +22,7 @@ import json
 import os
 from pathlib import Path
 
+from .matching import top_k_by_composite_score
 from .models import RecommendationResult, UserProfile
 
 _PROMPT_PATH = Path(__file__).parent.parent.parent / "prompts" / "recommendation_answer.md"
@@ -37,13 +51,23 @@ def _resolve_model(client) -> str:
         raise RuntimeError(f"Could not list models: {e}") from e
 
 
+def _strip_fences(raw: str) -> str:
+    if raw.startswith("```"):
+        parts = raw.split("```")
+        raw = parts[1] if len(parts) >= 2 else parts[0]
+        if raw.startswith("json"):
+            raw = raw[4:]
+    return raw.strip()
+
+
 def _build_score_tables(matched_datasets: list[dict], method_scores: dict) -> dict:
     """
-    Build a compact score table for each matched task.
-    Returns {task_id: {method: {overall, BPC, BER, SPC, DTP, completion_status}}}
-    Only includes methods that actually ran (overall is not None).
+    Retrieval step: build a compact score table for each matched benchmark task.
+    Returns {task_id: {method: {overall, BPC, BER, SPC, DTP, completion_status}}},
+    sorted by overall score descending. Only methods that actually ran are included.
+    This is retrieved grounding context, not a selection mechanism.
     """
-    tables = {}
+    tables: dict[str, dict] = {}
     seen_tasks = set()
     for ds in matched_datasets:
         raw_tid = ds.get("task_id")
@@ -60,21 +84,109 @@ def _build_score_tables(matched_datasets: list[dict], method_scores: dict) -> di
                         for k, v in scores.items()
                         if k in ("overall", "BPC", "BER", "SPC", "DTP", "completion_status")
                     }
-            # Sort by overall score descending so LLM sees the ranking clearly
             tables[tid] = dict(sorted(table.items(), key=lambda x: x[1]["overall"], reverse=True))
     return tables
 
 
-def write_answer(
+def _build_method_summaries(candidate_methods: list[dict], method_summaries: dict) -> dict:
+    """Retrieval step: pre-computed per-method cross-task-category stats for the candidate
+    pool the LLM is choosing from (never the full 42-method catalogue)."""
+    return {
+        c["method"]: method_summaries[c["method"]]
+        for c in candidate_methods
+        if c["method"] in method_summaries
+    }
+
+
+def _validate_selection(selected_raw, candidates: list[dict]) -> list[dict]:
+    """
+    Hallucination guard: keep only LLM-selected entries whose method name is present in the
+    real candidate pool. Real composite_score/evidence/warnings always come from the candidate
+    dict, never from the LLM — only the free-text "sentence" is taken from the model's output.
+    """
+    if not isinstance(selected_raw, list):
+        return []
+    by_name = {c["method"]: c for c in candidates}
+    validated = []
+    seen = set()
+    for item in selected_raw:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("method")
+        sentence = str(item.get("sentence") or "").strip()
+        if name in by_name and name not in seen and sentence:
+            entry = dict(by_name[name])
+            entry["sentence"] = sentence
+            validated.append(entry)
+            seen.add(name)
+    return validated
+
+
+def _resolve_selection(raw_text: str, candidates: list[dict], k: int = 3) -> tuple[list[dict], str | None, bool]:
+    """
+    Parse + validate the LLM's response against candidates. Backfills any slots the LLM's
+    selection didn't validly fill using the deterministic ranking, so the result always has
+    up to k entries drawn only from the real candidate pool.
+    Returns (selected, branch_note, is_fully_llm_selected).
+    """
+    target = min(k, len(candidates))
+    branch_note = None
+    validated: list[dict] = []
+    try:
+        parsed = json.loads(_strip_fences(raw_text))
+        validated = _validate_selection(parsed.get("selected"), candidates)
+        branch_note = parsed.get("branch_note")
+    except (json.JSONDecodeError, AttributeError, TypeError):
+        pass
+
+    is_fully_llm_selected = len(validated) >= target and target > 0
+
+    if len(validated) < target:
+        chosen_names = {v["method"] for v in validated}
+        backfill = [c for c in top_k_by_composite_score(candidates, len(candidates)) if c["method"] not in chosen_names]
+        for c in backfill:
+            if len(validated) >= target:
+                break
+            validated.append({**c, "sentence": None})
+
+    return validated, branch_note, is_fully_llm_selected
+
+
+def _format_answer(selected: list[dict], branch_note: str | None) -> str:
+    lines = []
+    for i, entry in enumerate(selected, start=1):
+        sentence = entry.get("sentence")
+        if not sentence:
+            score = entry.get("composite_score")
+            sentence = f"composite score {score}" if score is not None else "SOHIB decision-tree branch (static)"
+        lines.append(f"{i}. **{entry['method']}** — {sentence}")
+    if branch_note:
+        lines.append("")
+        lines.append(str(branch_note))
+    return "\n".join(lines)
+
+
+def run_recommendation(
     profile: UserProfile,
     result: RecommendationResult,
     method_scores: dict | None = None,
-) -> str:
+    method_summaries: dict | None = None,
+) -> tuple[RecommendationResult, str]:
     """
-    Ask the LLM to write a brief recommendation grounded in the actual benchmark scores.
-    method_scores: the full KB method_scores dict — passed so the LLM sees raw tables,
-    not just the pre-ranked list.
+    Bounded joint decision: ask the LLM to select and order the final top-3 from
+    result.candidate_methods (the deterministic, evidence-backed pool). Falls back to
+    matching.top_k_by_composite_score wherever the LLM call fails or its selection doesn't
+    validate. Returns (updated_result, display_text) — updated_result has recommended_methods /
+    discarded_methods / selection_source filled in from the resolved selection.
     """
+    candidates = result.candidate_methods
+
+    if not candidates:
+        empty = result.model_copy(update={
+            "recommended_methods": [], "discarded_methods": [], "selection_source": "deterministic_fallback",
+        })
+        return empty, "No candidate methods matched this profile in the benchmark."
+
     import anthropic
 
     api_key = os.environ.get("ANTHROPIC_API_KEY")
@@ -85,30 +197,50 @@ def write_answer(
             "or use --no-llm mode: sohib-agent chat --no-llm"
         )
 
-    client = anthropic.Anthropic(base_url="https://www.litellm.org", api_key=api_key)
+    client = anthropic.Anthropic(api_key=api_key)
     model = _resolve_model(client)
 
-    score_tables = {}
-    if method_scores:
-        score_tables = _build_score_tables(result.matched_datasets, method_scores)
+    task_score_tables = _build_score_tables(result.matched_datasets, method_scores) if method_scores else {}
+    candidate_summaries = _build_method_summaries(candidates, method_summaries) if method_summaries else {}
 
     payload = {
         "user_profile": profile.model_dump(),
         "matched_branch": result.matched_branch,
+        "decision_tree_crossref": result.decision_tree_crossref,
         "matched_datasets": result.matched_datasets,
-        "task_score_tables": score_tables,   # full tables — LLM reasons from this
-        "warnings": [
-            {"method": r["method"], "warnings": r.get("warnings", [])}
-            for r in result.recommended_methods
-            if r.get("warnings")
-        ],
+        # The pool the LLM must choose from — it may not name any method outside this list.
+        "candidate_methods": candidates,
+        # Retrieved grounding context to inform (not replace) the LLM's judgement.
+        "task_score_tables": task_score_tables,
+        "method_summaries": candidate_summaries,
         "confidence_note": result.confidence_note,
     }
 
     response = client.messages.create(
         model=model,
-        max_tokens=512,
+        max_tokens=1024,
         system=_PROMPT_PATH.read_text(),
         messages=[{"role": "user", "content": json.dumps(payload, indent=2)}],
     )
-    return response.content[0].text.strip()
+    raw_text = response.content[0].text.strip()
+
+    selected, branch_note, is_fully_llm_selected = _resolve_selection(raw_text, candidates, k=3)
+    selected_names = {s["method"] for s in selected}
+    discarded = [c for c in candidates if c["method"] not in selected_names]
+
+    selection_source = "llm_joint" if is_fully_llm_selected else "deterministic_fallback"
+    confidence_note = result.confidence_note
+    if selection_source == "deterministic_fallback":
+        confidence_note += (
+            " NOTE: the LLM's selection could not be fully validated against the candidate "
+            "pool (malformed response or a method it named wasn't in the pool) — missing slots "
+            "were filled deterministically by composite_score instead."
+        )
+
+    updated = result.model_copy(update={
+        "recommended_methods": selected,
+        "discarded_methods": discarded,
+        "selection_source": selection_source,
+        "confidence_note": confidence_note,
+    })
+    return updated, _format_answer(selected, branch_note)

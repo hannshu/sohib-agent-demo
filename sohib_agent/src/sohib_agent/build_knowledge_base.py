@@ -14,14 +14,13 @@ import pandas as pd
 
 from .method_metadata import METHOD_METADATA, TASK_CROSS_PLATFORM_INFO
 
-# Methods present in overall_ranks.csv but NOT in the manuscript's 40-method evaluation.
-# Verified by cross-referencing the manuscript abstract vs. the CSV row index.
-# These three rows are cell-resolution variants counted separately in the CSV but
-# grouped with their niche counterparts in the manuscript's 40-method count:
-#   DECIPHER (cell), FuseMap (cell) — cell-level variants of niche methods
-#   Nicheformer — added after manuscript submission
-# They are KEPT in method_scores for completeness but flagged here.
-EXTRA_METHODS_VS_MANUSCRIPT = {"DECIPHER (cell)", "FuseMap (cell)", "Nicheformer"}
+# Methods present in overall_ranks.csv (42 rows) but counted as ONE entry in the manuscript's 40.
+# Derivation: the manuscript lists 40 methods; the CSV has 42 rows.
+# FuseMap and DECIPHER each appear TWICE — as (niche) and (cell) variants — but are counted
+# as single methods in the manuscript's 40-method tally. Removing one row per pair gives 42 - 2 = 40.
+# Nicheformer IS one of the manuscript's 40 named methods and is NOT extra.
+# These two extra rows are KEPT in method_scores for completeness but flagged here.
+EXTRA_METHODS_VS_MANUSCRIPT = {"DECIPHER (cell)", "FuseMap (cell)"}
 
 
 def _parse_omics_type(raw: str) -> tuple[str, str | None]:
@@ -323,9 +322,13 @@ def build(raw_dir: Path) -> dict:
         "method_metadata": method_metadata,
         "_reconciliation_note": (
             f"overall_ranks.csv contains {ranks_df.shape[0]} methods; "
-            f"manuscript evaluates 40. Extra methods vs. manuscript: "
+            f"manuscript evaluates 40. "
+            f"The 2 extra rows are cell-level variants that the manuscript counts as single methods: "
             f"{sorted(EXTRA_METHODS_VS_MANUSCRIPT)}. "
-            "These are kept in method_scores but flagged here."
+            f"Arithmetic: {ranks_df.shape[0]} CSV rows - 2 (cell variants double-counted) = "
+            f"{ranks_df.shape[0] - len(EXTRA_METHODS_VS_MANUSCRIPT)} (matches manuscript's 40). "
+            "Both rows are kept in method_scores but flagged here. "
+            "Nicheformer IS one of the manuscript's 40 named methods — it is not extra."
         ),
     }
 

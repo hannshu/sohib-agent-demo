@@ -1,57 +1,76 @@
 # Hand-encoded from the SOHIB manuscript.
 # deep_learning: True if the method uses a neural network backbone.
 # omics_agnostic: True if the method can process non-transcriptomic inputs without modification.
+#   Note: CellCharter achieves cross-omics applicability via per-omics encoder swapping — a different
+#   mechanism than CAST/DECIPHER/BINARY (which use omics-agnostic architectures). It is tagged
+#   omics_agnostic=False here to distinguish the mechanism; see omics_cross_strategy for details.
 # category: coarse grouping used for display only.
 # architecturally_inapplicable: list of omics types this method CANNOT run on by design.
-#   (transcriptomics methods applied to proteomics/metabolomics/epigenomics will fail or are meaningless)
+#   This is a HARD EXCLUSION — methods in this list are removed from recommended_methods entirely
+#   when the user's omics_type is listed. It is not a preference; it is a design constraint.
+# designed_resolution: primary resolution the method was designed and performs best for,
+#   based on SOHIB manuscript results (Task 14 CLP vs. BPC/BER rankings, Figure 4c/4d).
+#   "domain"  — better at spatial domain-level integration (high BPC/BER/SPC/DTP scores)
+#   "cell"    — better at cell-type-level integration (high CLP scores)
+#   "both"    — performs well on both axes
+#   "niche"   — designed for niche/neighbourhood embeddings (FuseMap/DECIPHER niche variants)
+#   None      — insufficient benchmark data to determine (foundation models tested on limited tasks)
 
 METHOD_METADATA: dict[str, dict] = {
-    "GraphPCA":        {"deep_learning": False, "omics_agnostic": False, "category": "graph_spatial",     "architecturally_inapplicable": []},
-    "STAIR":           {"deep_learning": True,  "omics_agnostic": False, "category": "graph_spatial",     "architecturally_inapplicable": []},
-    "STAGATE":         {"deep_learning": True,  "omics_agnostic": False, "category": "graph_spatial",     "architecturally_inapplicable": []},
-    "CAST":            {"deep_learning": True,  "omics_agnostic": True,  "category": "end_to_end_spatial", "architecturally_inapplicable": []},
-    "CellCharter":     {"deep_learning": True,  "omics_agnostic": False, "category": "graph_spatial",     "architecturally_inapplicable": []},
-    "DeepST":          {"deep_learning": True,  "omics_agnostic": False, "category": "graph_spatial",     "architecturally_inapplicable": []},
-    "SPIRAL":          {"deep_learning": True,  "omics_agnostic": False, "category": "graph_spatial",     "architecturally_inapplicable": []},
-    "SpaBatch":        {"deep_learning": True,  "omics_agnostic": False, "category": "graph_spatial",     "architecturally_inapplicable": []},
-    "SEDR":            {"deep_learning": True,  "omics_agnostic": False, "category": "graph_spatial",     "architecturally_inapplicable": []},
-    "STAligner":       {"deep_learning": True,  "omics_agnostic": False, "category": "graph_spatial",     "architecturally_inapplicable": []},
-    "STAIG":           {"deep_learning": True,  "omics_agnostic": False, "category": "graph_spatial",     "architecturally_inapplicable": []},
-    "spCLUE":          {"deep_learning": True,  "omics_agnostic": False, "category": "graph_spatial",     "architecturally_inapplicable": []},
-    "STAMP":           {"deep_learning": True,  "omics_agnostic": False, "category": "graph_spatial",     "architecturally_inapplicable": []},
-    "BINARY":          {"deep_learning": False, "omics_agnostic": True,  "category": "non_parametric",    "architecturally_inapplicable": []},
+    # Graph/spatial methods — designed for domain-level integration (spatial domain structure preservation)
+    "GraphPCA":        {"deep_learning": False, "omics_agnostic": False, "category": "graph_spatial",      "architecturally_inapplicable": [],                                          "designed_resolution": "domain"},
+    "STAIR":           {"deep_learning": True,  "omics_agnostic": False, "category": "graph_spatial",      "architecturally_inapplicable": [],                                          "designed_resolution": "domain"},
+    "STAGATE":         {"deep_learning": True,  "omics_agnostic": False, "category": "graph_spatial",      "architecturally_inapplicable": [],                                          "designed_resolution": "domain"},
+    # CellCharter achieves cross-omics via per-omics encoder swapping, not an omics-agnostic architecture.
+    "CellCharter":     {"deep_learning": True,  "omics_agnostic": False, "category": "graph_spatial",      "architecturally_inapplicable": [],                                          "designed_resolution": "domain", "omics_cross_strategy": "per_omics_encoder"},
+    "DeepST":          {"deep_learning": True,  "omics_agnostic": False, "category": "graph_spatial",      "architecturally_inapplicable": [],                                          "designed_resolution": "domain"},
+    "SPIRAL":          {"deep_learning": True,  "omics_agnostic": False, "category": "graph_spatial",      "architecturally_inapplicable": [],                                          "designed_resolution": "domain"},
+    "SpaBatch":        {"deep_learning": True,  "omics_agnostic": False, "category": "graph_spatial",      "architecturally_inapplicable": [],                                          "designed_resolution": "domain"},
+    "SEDR":            {"deep_learning": True,  "omics_agnostic": False, "category": "graph_spatial",      "architecturally_inapplicable": [],                                          "designed_resolution": "domain"},
+    "STAligner":       {"deep_learning": True,  "omics_agnostic": False, "category": "graph_spatial",      "architecturally_inapplicable": [],                                          "designed_resolution": "domain"},
+    "STAIG":           {"deep_learning": True,  "omics_agnostic": False, "category": "graph_spatial",      "architecturally_inapplicable": [],                                          "designed_resolution": "domain"},
+    "spCLUE":          {"deep_learning": True,  "omics_agnostic": False, "category": "graph_spatial",      "architecturally_inapplicable": [],                                          "designed_resolution": "domain"},
+    "STAMP":           {"deep_learning": True,  "omics_agnostic": False, "category": "graph_spatial",      "architecturally_inapplicable": [],                                          "designed_resolution": "domain"},
+    "SpiceMix":        {"deep_learning": True,  "omics_agnostic": False, "category": "graph_spatial",      "architecturally_inapplicable": [],                                          "designed_resolution": "domain"},
+    "INSTINCT":        {"deep_learning": True,  "omics_agnostic": False, "category": "graph_spatial",      "architecturally_inapplicable": [],                                          "designed_resolution": "domain"},
+    "MENDER":          {"deep_learning": False, "omics_agnostic": False, "category": "graph_spatial",      "architecturally_inapplicable": [],                                          "designed_resolution": "domain"},
+    "STACI":           {"deep_learning": True,  "omics_agnostic": False, "category": "graph_spatial",      "architecturally_inapplicable": [],                                          "designed_resolution": "domain"},
+    "DeepGFT":         {"deep_learning": True,  "omics_agnostic": False, "category": "graph_spatial",      "architecturally_inapplicable": [],                                          "designed_resolution": "domain"},
+    "MaskGraphene":    {"deep_learning": True,  "omics_agnostic": False, "category": "graph_spatial",      "architecturally_inapplicable": [],                                          "designed_resolution": "domain"},
+    "PRECAST":         {"deep_learning": True,  "omics_agnostic": False, "category": "graph_spatial",      "architecturally_inapplicable": [],                                          "designed_resolution": "domain"},
+    "GraphST":         {"deep_learning": True,  "omics_agnostic": False, "category": "graph_spatial",      "architecturally_inapplicable": [],                                          "designed_resolution": "domain"},
+    "SpaVAE":          {"deep_learning": True,  "omics_agnostic": False, "category": "graph_spatial",      "architecturally_inapplicable": [],                                          "designed_resolution": "domain"},
+    "SIMVI":           {"deep_learning": True,  "omics_agnostic": False, "category": "graph_spatial",      "architecturally_inapplicable": [],                                          "designed_resolution": "domain"},
+    "Novae":           {"deep_learning": True,  "omics_agnostic": False, "category": "graph_spatial",      "architecturally_inapplicable": [],                                          "designed_resolution": "domain"},
+    "stClinic":        {"deep_learning": True,  "omics_agnostic": False, "category": "graph_spatial",      "architecturally_inapplicable": [],                                          "designed_resolution": "domain"},
+    # Omics-agnostic methods — designed for cross-omics domain-level integration
+    "CAST":            {"deep_learning": True,  "omics_agnostic": True,  "category": "end_to_end_spatial", "architecturally_inapplicable": [],                                          "designed_resolution": "domain"},
+    "BINARY":          {"deep_learning": False, "omics_agnostic": True,  "category": "non_parametric",     "architecturally_inapplicable": [],                                          "designed_resolution": "domain"},
     # FuseMap and DECIPHER each produce two distinct embedding types from the same model.
     # The (niche) variant outputs spatially-smoothed neighbourhood embeddings → suited for domain-level tasks.
     # The (cell) variant outputs per-cell embeddings → suited for cell-level tasks.
     # They are scored separately in the benchmark and should be recommended in different scenarios.
-    "FuseMap (niche)": {"deep_learning": True,  "omics_agnostic": True,  "category": "multimodal",        "architecturally_inapplicable": [], "embedding_type": "niche",  "base_method": "FuseMap"},
-    "FuseMap (cell)":  {"deep_learning": True,  "omics_agnostic": True,  "category": "multimodal",        "architecturally_inapplicable": [], "embedding_type": "cell",   "base_method": "FuseMap"},
-    "DECIPHER (niche)":{"deep_learning": True,  "omics_agnostic": True,  "category": "multimodal",        "architecturally_inapplicable": [], "embedding_type": "niche",  "base_method": "DECIPHER"},
-    "DECIPHER (cell)": {"deep_learning": True,  "omics_agnostic": True,  "category": "multimodal",        "architecturally_inapplicable": [], "embedding_type": "cell",   "base_method": "DECIPHER"},
-    "stClinic":        {"deep_learning": True,  "omics_agnostic": False, "category": "graph_spatial",     "architecturally_inapplicable": []},
-    "scNiche":         {"deep_learning": True,  "omics_agnostic": False, "category": "niche",             "architecturally_inapplicable": ["proteomics", "metabolomics", "epigenomics"]},
-    "SpiceMix":        {"deep_learning": True,  "omics_agnostic": False, "category": "graph_spatial",     "architecturally_inapplicable": []},
-    "INSTINCT":        {"deep_learning": True,  "omics_agnostic": False, "category": "graph_spatial",     "architecturally_inapplicable": []},
-    "MENDER":          {"deep_learning": False, "omics_agnostic": False, "category": "graph_spatial",     "architecturally_inapplicable": []},
-    "STACI":           {"deep_learning": True,  "omics_agnostic": False, "category": "graph_spatial",     "architecturally_inapplicable": []},
-    "BANKSY":          {"deep_learning": False, "omics_agnostic": False, "category": "graph_spatial",     "architecturally_inapplicable": []},
-    "DeepGFT":         {"deep_learning": True,  "omics_agnostic": False, "category": "graph_spatial",     "architecturally_inapplicable": []},
-    "scVI":            {"deep_learning": True,  "omics_agnostic": False, "category": "scRNA_adapted",     "architecturally_inapplicable": ["proteomics", "metabolomics", "epigenomics"]},
-    "MaskGraphene":    {"deep_learning": True,  "omics_agnostic": False, "category": "graph_spatial",     "architecturally_inapplicable": []},
-    "Harmony":         {"deep_learning": False, "omics_agnostic": False, "category": "scRNA_adapted",     "architecturally_inapplicable": ["proteomics", "metabolomics", "epigenomics"]},
-    "PRECAST":         {"deep_learning": True,  "omics_agnostic": False, "category": "graph_spatial",     "architecturally_inapplicable": []},
-    "GraphST":         {"deep_learning": True,  "omics_agnostic": False, "category": "graph_spatial",     "architecturally_inapplicable": []},
-    "Scanorama":       {"deep_learning": False, "omics_agnostic": False, "category": "scRNA_adapted",     "architecturally_inapplicable": ["proteomics", "metabolomics", "epigenomics"]},
-    "SpaVAE":          {"deep_learning": True,  "omics_agnostic": False, "category": "graph_spatial",     "architecturally_inapplicable": []},
-    "SIMVI":           {"deep_learning": True,  "omics_agnostic": False, "category": "graph_spatial",     "architecturally_inapplicable": []},
-    "CELLama":         {"deep_learning": True,  "omics_agnostic": False, "category": "llm_based",         "architecturally_inapplicable": ["proteomics", "metabolomics", "epigenomics"]},
-    "CellNiche":       {"deep_learning": True,  "omics_agnostic": False, "category": "niche",             "architecturally_inapplicable": ["proteomics", "metabolomics", "epigenomics"]},
-    "Novae":           {"deep_learning": True,  "omics_agnostic": False, "category": "graph_spatial",     "architecturally_inapplicable": []},
-    "scGPT-spatial":   {"deep_learning": True,  "omics_agnostic": False, "category": "llm_based",         "architecturally_inapplicable": ["proteomics", "metabolomics", "epigenomics"]},
-    "SToFM":           {"deep_learning": True,  "omics_agnostic": False, "category": "llm_based",         "architecturally_inapplicable": ["proteomics", "metabolomics", "epigenomics"]},
-    "NicheCompass":    {"deep_learning": True,  "omics_agnostic": False, "category": "niche",             "architecturally_inapplicable": ["proteomics", "metabolomics", "epigenomics"]},
-    "CellPLM":         {"deep_learning": True,  "omics_agnostic": False, "category": "llm_based",         "architecturally_inapplicable": ["proteomics", "metabolomics", "epigenomics"]},
-    "Nicheformer":     {"deep_learning": True,  "omics_agnostic": False, "category": "llm_based",         "architecturally_inapplicable": ["proteomics", "metabolomics", "epigenomics"]},
+    "FuseMap (niche)": {"deep_learning": True,  "omics_agnostic": True,  "category": "multimodal",         "architecturally_inapplicable": [], "embedding_type": "niche", "base_method": "FuseMap",    "designed_resolution": "niche"},
+    "FuseMap (cell)":  {"deep_learning": True,  "omics_agnostic": True,  "category": "multimodal",         "architecturally_inapplicable": [], "embedding_type": "cell",  "base_method": "FuseMap",    "designed_resolution": "cell"},
+    "DECIPHER (niche)":{"deep_learning": True,  "omics_agnostic": True,  "category": "multimodal",         "architecturally_inapplicable": [], "embedding_type": "niche", "base_method": "DECIPHER",   "designed_resolution": "niche"},
+    "DECIPHER (cell)": {"deep_learning": True,  "omics_agnostic": True,  "category": "multimodal",         "architecturally_inapplicable": [], "embedding_type": "cell",  "base_method": "DECIPHER",   "designed_resolution": "cell"},
+    # scRNA-adapted methods — transcriptomics-only; perform comparatively better at cell-level
+    # (manuscript Figure 4c/4d: Scanorama, Harmony, BANKSY top the CLP-based cell-level branch)
+    "scVI":            {"deep_learning": True,  "omics_agnostic": False, "category": "scRNA_adapted",      "architecturally_inapplicable": ["proteomics", "metabolomics", "epigenomics"], "designed_resolution": "cell"},
+    "Harmony":         {"deep_learning": False, "omics_agnostic": False, "category": "scRNA_adapted",      "architecturally_inapplicable": ["proteomics", "metabolomics", "epigenomics"], "designed_resolution": "cell"},
+    "Scanorama":       {"deep_learning": False, "omics_agnostic": False, "category": "scRNA_adapted",      "architecturally_inapplicable": ["proteomics", "metabolomics", "epigenomics"], "designed_resolution": "cell"},
+    # BANKSY: graph-spatial but performs comparatively better at cell-level per manuscript
+    "BANKSY":          {"deep_learning": False, "omics_agnostic": False, "category": "graph_spatial",      "architecturally_inapplicable": [],                                          "designed_resolution": "cell"},
+    # Niche methods — spatial niche/neighbourhood analysis; transcriptomics-only
+    "scNiche":         {"deep_learning": True,  "omics_agnostic": False, "category": "niche",              "architecturally_inapplicable": ["proteomics", "metabolomics", "epigenomics"], "designed_resolution": "domain"},
+    "CellNiche":       {"deep_learning": True,  "omics_agnostic": False, "category": "niche",              "architecturally_inapplicable": ["proteomics", "metabolomics", "epigenomics"], "designed_resolution": "domain"},
+    "NicheCompass":    {"deep_learning": True,  "omics_agnostic": False, "category": "niche",              "architecturally_inapplicable": ["proteomics", "metabolomics", "epigenomics"], "designed_resolution": "domain"},
+    # Foundation/LLM-based methods — transcriptomics-only; limited benchmark coverage
+    "CELLama":         {"deep_learning": True,  "omics_agnostic": False, "category": "llm_based",          "architecturally_inapplicable": ["proteomics", "metabolomics", "epigenomics"], "designed_resolution": None},
+    "scGPT-spatial":   {"deep_learning": True,  "omics_agnostic": False, "category": "llm_based",          "architecturally_inapplicable": ["proteomics", "metabolomics", "epigenomics"], "designed_resolution": None},
+    "SToFM":           {"deep_learning": True,  "omics_agnostic": False, "category": "llm_based",          "architecturally_inapplicable": ["proteomics", "metabolomics", "epigenomics"], "designed_resolution": None},
+    "CellPLM":         {"deep_learning": True,  "omics_agnostic": False, "category": "llm_based",          "architecturally_inapplicable": ["proteomics", "metabolomics", "epigenomics"], "designed_resolution": None},
+    "Nicheformer":     {"deep_learning": True,  "omics_agnostic": False, "category": "llm_based",          "architecturally_inapplicable": ["proteomics", "metabolomics", "epigenomics"], "designed_resolution": None},
 }
 
 # Hand-encoded task-level metadata for the four cross-platform tasks (25-28).

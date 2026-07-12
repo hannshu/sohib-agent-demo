@@ -168,23 +168,28 @@ def _method_score(method: str, task_scores: dict, priority: str) -> float:
     return base
 
 
+def is_architecturally_excluded(method: str, profile: UserProfile, meta: dict) -> bool:
+    """
+    Return True if this method must be hard-excluded from recommended_methods.
+    architecturally_inapplicable is a binary design fact: the method cannot process
+    that omics type by design and must not appear in results at all.
+    """
+    inapplicable = meta.get("architecturally_inapplicable", [])
+    return bool(profile.omics_type and profile.omics_type in inapplicable)
+
+
 def _build_warnings(method: str, profile: UserProfile, meta: dict) -> list[str]:
     """
-    Return a list of plain-language warnings for a method given the user's profile.
+    Return a list of soft warnings for a method given the user's profile.
     Warnings are informational — the method still appears in the ranked list.
     The user decides whether the warning is disqualifying for their situation.
+    Note: architecturally_inapplicable methods are hard-excluded before this is called;
+    they never reach warning generation.
     """
     warnings = []
 
     if profile.avoid_deep_learning and meta.get("deep_learning", False):
         warnings.append("uses deep learning (user requested non-DL methods)")
-
-    inapplicable = meta.get("architecturally_inapplicable", [])
-    if profile.omics_type and profile.omics_type in inapplicable:
-        warnings.append(
-            f"architecturally designed for transcriptomics — not evaluated on "
-            f"{profile.omics_type} data in the benchmark; results may not transfer"
-        )
 
     # FuseMap and DECIPHER produce two distinct embedding types from the same underlying model.
     # Warn when the user's resolution goal and the variant's embedding type are mismatched.
@@ -241,8 +246,13 @@ def rank_methods_domain_level(
     for method, scores in method_agg.items():
         if not scores:
             continue
-        avg = sum(scores) / len(scores)
         meta = METHOD_METADATA.get(method, {})
+
+        # Hard exclusion: architecturally_inapplicable methods never appear in results.
+        if is_architecturally_excluded(method, profile, meta):
+            continue
+
+        avg = sum(scores) / len(scores)
         warnings = _build_warnings(method, profile, meta)
 
         best_ds = matched_datasets[0]
@@ -323,6 +333,8 @@ def rank_methods_cell_level(
         if not s:
             continue
         meta = METHOD_METADATA.get(m, {})
+        if is_architecturally_excluded(m, profile, meta):
+            continue
         ranked.append({
             "method": m,
             "composite_score": round(sum(s) / len(s), 4),
@@ -331,3 +343,17 @@ def rank_methods_cell_level(
         })
     ranked.sort(key=lambda x: x["composite_score"], reverse=True)
     return ranked[:10], []
+
+
+def top_k_by_composite_score(candidates: list[dict], k: int = 3) -> list[dict]:
+    """
+    Deterministic fallback/baseline selection: top-k candidates by composite_score.
+    Used (a) directly in --no-llm mode, where there is no LLM to make a joint decision, and
+    (b) by answer_writer.py to backfill slots the LLM's selection failed to validate.
+    If scores are None (the cell-level static branch fallback has no computed scores at all),
+    there is nothing to rank by — the candidates are returned as given, un-reordered.
+    """
+    scored = [c for c in candidates if c.get("composite_score") is not None]
+    if not scored:
+        return candidates[:k]
+    return sorted(scored, key=lambda c: c["composite_score"], reverse=True)[:k]
